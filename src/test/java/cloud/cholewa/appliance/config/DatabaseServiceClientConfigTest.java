@@ -61,14 +61,14 @@ class DatabaseServiceClientConfigTest {
 
     @Test
     void should_answer_within_five_seconds() {
-        assertThat(DatabaseServiceClientConfig.RESPONSE_TIMEOUT).isEqualTo(Duration.ofSeconds(5));
+        assertThat(DatabaseServiceClientConfig.RESPONSE_TIMEOUT).hasSeconds(5);
     }
 
     //an idle connection to a restarted database-service must not be reused for ever
     @Test
     void should_retire_idle_and_old_connections_of_the_pool() {
-        assertThat(DatabaseServiceClientConfig.MAX_IDLE_TIME).isEqualTo(Duration.ofMinutes(2));
-        assertThat(DatabaseServiceClientConfig.MAX_LIFE_TIME).isEqualTo(Duration.ofMinutes(30));
+        assertThat(DatabaseServiceClientConfig.MAX_IDLE_TIME).hasMinutes(2);
+        assertThat(DatabaseServiceClientConfig.MAX_LIFE_TIME).hasMinutes(30);
     }
 
     private WebClient client(final Duration responseTimeout) {
