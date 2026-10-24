@@ -45,7 +45,8 @@ review.
   connection of the application (`cholewa.notification.enabled`). It needs correlated confirms,
   returns and the mandatory flag on the template and refuses to start without them (pinned by
   `ApplianceServiceApplicationTest`). `env` is `prod` in `home`, `dev` in `local` and `test` - a
-  run outside the cluster never publishes to the household. `rabbitmq-password` has no default:
+  run outside the cluster never publishes to the household; `home` alone points at
+  `rabbitmq-headless`, which resolves only in the cluster (the same shape as weather, blinds and light). `rabbitmq-password` has no default:
   `cholewa.required-properties` refuses the start.
 - **Scheduling is off under `test`** (`SchedulingConfig`, `@Profile("!test")`), and the `test`
   document points the broker and database-service at port 1 - a context test neither polls nor
@@ -55,8 +56,11 @@ review.
 - **`shelly-client` keeps its beans** (`ShellyGen1Client` for the plugs) - unlike water-service and
   boiler-service, which switch them off.
 - **The client of database-service** (`databaseServiceWebClient`) comes from the injected builder -
-  traced and logged by Logbook - with a connect timeout and a response timeout of 5 s.
-- **Tests use `mockwebserver3`** when a client gets its first test, never the legacy
-  `mockwebserver` (JUnit 4) of the reference.
+  traced and logged by Logbook - with a connect timeout and a response timeout of 5 s, and its own
+  named `ConnectionProvider` with 2 min idle / 30 min life (the gateway's HAS-212 limits), pinned by
+  `DatabaseServiceClientConfigTest`.
+- **Flyway logs `No migrations found` (WARN) on every start** until HAS-278 adds `V1` - expected;
+  the start is otherwise clean (the schema history table proves the grant on `public`).
+- **Tests use `mockwebserver3`**, never the legacy `mockwebserver` (JUnit 4) of the reference.
 - **Surefire activates the `test` profile for every class**; the `includes` match only
   `**/*Test.java` and `**/*IT.java`.
