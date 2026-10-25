@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.time.temporal.ChronoUnit;
+
 //The cycles in appliance_run: the state an appliance starts from after a restart of the pod, and what a
 //transition writes. A write that fails is a WARN and changes nothing in memory - the cycle goes on; the
 //next transition writes what it knows (a finish without the row of its start inserts the whole row), so
@@ -60,7 +62,7 @@ public class RunStore {
     private Mono<Long> finish(final long deviceId, final Long runId, final Transition.Finished finished) {
         final Mono<ApplianceRunEntity> row = runId == null
             ? Mono.empty()
-            : applianceRunRepository.findById(runId).filter(run -> run.startedAt().equals(finished.startedAt()));
+            : applianceRunRepository.findById(runId).filter(run -> sameStart(run, finished));
 
         return row
             .defaultIfEmpty(ApplianceRunEntity.builder().deviceId(deviceId).startedAt(finished.startedAt()).build())
@@ -72,6 +74,12 @@ public class RunStore {
             .flatMap(applianceRunRepository::save)
             .map(ApplianceRunEntity::id)
             .onErrorResume(e -> failed("the end of a cycle", deviceId, e, runId));
+    }
+
+    //the row of this cycle and not a stale one: timestamptz keeps microseconds, so a start with a finer fraction
+    //in memory is compared at the precision the database stores
+    private static boolean sameStart(final ApplianceRunEntity run, final Transition.Finished finished) {
+        return run.startedAt().truncatedTo(ChronoUnit.MICROS).equals(finished.startedAt().truncatedTo(ChronoUnit.MICROS));
     }
 
     private static Mono<Long> failed(final String what, final long deviceId, final Throwable e, final Long runId) {

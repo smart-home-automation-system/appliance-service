@@ -27,12 +27,12 @@ public class ApplianceRegistry {
                 final Set<String> skipped = ConcurrentHashMap.newKeySet();
                 devices.forEach(device -> {
                     switch (ApplianceMapper.map(device)) {
-                        case ApplianceMapper.Watched w -> watched.add(w.appliance());
-                        case ApplianceMapper.Skipped s -> {
-                            final String key = device.getId() + ": " + s.reason();
+                        case ApplianceMapper.Watched(Appliance appliance) -> watched.add(appliance);
+                        case ApplianceMapper.Skipped(String reason) -> {
+                            final String key = device.getId() + ": " + reason;
                             skipped.add(key);
                             if (said.add(key)) {
-                                log.warn("Appliance {} of the registry is not watched: {}", device.getId(), s.reason());
+                                log.warn("Appliance {} of the registry is not watched: {}", device.getId(), reason);
                             }
                         }
                     }

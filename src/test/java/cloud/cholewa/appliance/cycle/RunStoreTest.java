@@ -91,6 +91,20 @@ class RunStoreTest {
         assertThat(saved.getValue()).isEqualTo(run(null, null).toBuilder().finishedAt(END).energyWh(812L).maxWatts(2140).build());
     }
 
+    //timestamptz keeps microseconds: the row read back is still the row of a start with a finer fraction
+    @Test
+    void should_complete_the_row_of_a_start_stored_at_microsecond_precision() {
+        final Instant start = T0.plusNanos(564_045_500);
+        when(repository.findById(5L)).thenReturn(Mono.just(run(null, null).toBuilder().startedAt(T0.plusNanos(564_046_000)).build()));
+
+        sut.write(7, 5L, new Transition.Finished(start.plusNanos(500), END, 812, 2140)).as(StepVerifier::create)
+            .expectNext(5L).verifyComplete();
+
+        final ArgumentCaptor<ApplianceRunEntity> saved = ArgumentCaptor.forClass(ApplianceRunEntity.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().id()).isEqualTo(5L);
+    }
+
     //the start could not be stored, or the row is of another cycle: the finish inserts the whole row
     @Test
     void should_insert_the_whole_row_of_a_finish_without_the_row_of_its_start() {

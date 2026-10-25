@@ -94,7 +94,8 @@ times are the clock of the house without an offset; a field not known is left ou
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
 
 `from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
-longer range is a `400`.
+longer range is a `400`. The history is answered for a watched appliance only: one
+switched off or removed in the registry is a `404`, though its rows stay.
 
 # Database
 

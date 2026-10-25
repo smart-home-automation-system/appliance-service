@@ -68,6 +68,20 @@ class ApplianceMonitorTest {
         });
     }
 
+    //a cycle that cannot be restored is not replaced by an idle one: the appliance waits for the next refresh
+    @Test
+    void should_try_again_an_appliance_whose_cycle_could_not_be_restored() {
+        when(registry.read()).thenReturn(Mono.just(List.of(DRYER_PLUG)));
+        when(runStore.restore(31, DRYER)).thenReturn(Mono.error(new IllegalStateException("database away")),
+            Mono.just(new RunStore.Restored(CycleDetector.running(T0), 5L)));
+
+        sut.refresh().as(StepVerifier::create).verifyComplete();
+        assertThat(sut.status(31)).isEmpty();
+
+        sut.refresh().as(StepVerifier::create).verifyComplete();
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.RUNNING);
+    }
+
     @Test
     void should_keep_the_appliances_when_the_registry_cannot_be_read() {
         when(registry.read()).thenReturn(Mono.just(List.of(DRYER_PLUG)), Mono.empty());

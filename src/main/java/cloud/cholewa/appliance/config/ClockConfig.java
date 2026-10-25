@@ -5,8 +5,8 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.Clock;
 
-//the time of the house - the zone of the JVM, as LocalDateTime.now(ZoneId.systemDefault()) everywhere else;
-//a bean so that a test can move it
+//the time of the house - the zone of the JVM (TZ of the image), as everywhere else in the organization; a bean
+//so that a test can move it
 @Configuration(proxyBeanMethods = false)
 public class ClockConfig {
 

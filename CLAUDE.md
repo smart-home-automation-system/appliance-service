@@ -77,8 +77,11 @@ review.
   (HAS-279) and the tag claim (HAS-343) take.
 - **`appliance_run`**: inserted at the start of a cycle (a restart of the pod goes on with it),
   completed at the end (`finished_at` is the fall of the draw, not the moment the end was certain),
-  deleted when discarded. A failed write is a WARN and changes nothing in memory; a finish without
-  the row of its start inserts the whole row. The energy and the highest draw count from the start
+  deleted when discarded. **A finished cycle a new one replaced** (`Started.replacedUnacknowledged`) keeps
+  `acknowledged_at` null in its row - HAS-279 decides what an unacknowledged replaced row means for the
+  reminders. A failed write is a WARN and changes nothing in memory; a finish without
+  the row of its start inserts the whole row. The row of a finish is matched by its id and its start at
+  microsecond precision (what `timestamptz` stores); the sample times are whole seconds anyway. The energy and the highest draw count from the start
   of the pod for a cycle restored as running. `awaitingSince` of a restored finished cycle is its end
   plus `finishedAfterMinutes`.
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after

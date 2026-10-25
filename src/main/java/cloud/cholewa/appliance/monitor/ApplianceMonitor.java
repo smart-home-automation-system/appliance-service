@@ -98,8 +98,10 @@ public class ApplianceMonitor {
         final long deviceId = appliance.appliance().id();
 
         return store(deviceId, sample)
-            .then(Mono.justOrEmpty(appliance.detector()
+            //after the sample is stored and inside the subscription the pass is bounded by
+            .then(Mono.fromCallable(() -> appliance.detector()
                 .sample(sample.at(), sample.watts(), sample.totalWattMinutes(), appliance.appliance().thresholds())))
+            .flatMap(Mono::justOrEmpty)
             .flatMap(transition -> {
                 log.info("{} ({}): {}", appliance.appliance().name(), deviceId, transition);
                 return runStore.write(deviceId, appliance.runId(), transition)

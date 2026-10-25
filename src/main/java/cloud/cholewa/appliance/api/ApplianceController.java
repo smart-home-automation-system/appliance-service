@@ -23,6 +23,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 //The read API of the appliances (HAS-278), under the base path /home/appliance; routed by the gateway with
@@ -83,17 +84,19 @@ public class ApplianceController {
         }));
     }
 
+    //the history of an appliance the service watches: one switched off or removed in the registry answers 404,
+    //though its rows stay in the database - the dashboard reads the history of the appliances it lists
     private Mono<Void> watched(final long id) {
         return Mono.fromRunnable(() -> applianceMonitor.status(id).orElseThrow(() -> ApplianceException.notFound(id)));
     }
 
-    //the bounds by the clock of the house; the span is counted on the wall clock, so two days across a change
-    //of the clocks are two days. A bound out of what the database holds fails the span or the order first
+    //the bounds by the clock of the house; the span is counted on the wall clock (a fixed offset, not the zone
+    //of the house), so two days across a change of the clocks are two days. A bound out of what the database holds fails the span or the order first
     private Range range(final LocalDateTime from, final LocalDateTime to, final Duration max, final String maxText) {
         if (!to.isAfter(from)) {
             throw new ServerWebInputException("to must be after from");
         }
-        if (Duration.between(from, to).compareTo(max) > 0) {
+        if (Duration.between(from.atOffset(ZoneOffset.UTC), to.atOffset(ZoneOffset.UTC)).compareTo(max) > 0) {
             throw new ServerWebInputException("from and to must be at most " + maxText + " apart");
         }
         return new Range(from.atZone(clock.getZone()).toInstant(), to.atZone(clock.getZone()).toInstant());
