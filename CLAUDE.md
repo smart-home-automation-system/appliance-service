@@ -91,8 +91,12 @@ review.
   clock of the house without an offset (`LOCAL_DATE_TIME` of `ApplianceController`, an offset is a
   400). `NOT_FOUND_APPLIANCE` (`ApplianceError`) is wire contract, as are the words of
   `ApplianceState` - both pinned by `ApplianceErrorTest`.
+- **Layers of the API**: `ApplianceController` only takes the request; `ApplianceService` holds the logic -
+  the lookup of a watched appliance (404), the rules of a range (a `400` as `ResponseStatusException`, as
+  `WeatherHistoryService`), the clock of the house and the reply models - and is the one that reads the
+  monitor and the repositories (owner, 2026-10-25: no controller depends on a repository).
 - **What runs at the same time**: the refresh and the sampling pass run on two threads of the
-  scheduler pool and the API on Netty - `TrackedAppliance` has volatile fields, the detector is
+  scheduler pool and the API on Netty - `TrackedAppliance` holds atomic references, the detector is
   synchronized, the row and the samples are written by the sampling pass only. The database is
   written one appliance after the other: a pass holds one connection of the pool of 2 at a time,
   the restore of the refresh and the reads of the API take the other.

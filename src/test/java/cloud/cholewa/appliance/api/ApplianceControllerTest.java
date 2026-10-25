@@ -1,71 +1,56 @@
 package cloud.cholewa.appliance.api;
 
+import cloud.cholewa.appliance.api.model.ApplianceReply;
+import cloud.cholewa.appliance.api.model.RunReply;
+import cloud.cholewa.appliance.api.model.SampleReply;
 import cloud.cholewa.appliance.config.ExceptionHandlerConfig;
 import cloud.cholewa.appliance.cycle.ApplianceState;
-import cloud.cholewa.appliance.cycle.CycleThresholds;
-import cloud.cholewa.appliance.cycle.CycleView;
-import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
-import cloud.cholewa.appliance.database.model.ApplianceSampleEntity;
-import cloud.cholewa.appliance.database.repository.ApplianceRunRepository;
-import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
-import cloud.cholewa.appliance.monitor.ApplianceMonitor;
-import cloud.cholewa.appliance.monitor.ApplianceStatus;
-import cloud.cholewa.appliance.registry.Appliance;
+import cloud.cholewa.appliance.error.ApplianceException;
+import cloud.cholewa.appliance.service.ApplianceService;
 import cloud.cholewa.home.model.RoomName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
+import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-//The JSON is the contract of the dashboard, so the bodies are written out whole. The house is in
-//Europe/Warsaw: 08:00Z is 10:00 in October
+//The JSON is the contract of the dashboard, so the bodies are written out whole; the logic is ApplianceService's
+//(ApplianceServiceTest) - here the request, the shape of the answer and the statuses
 @WebFluxTest(ApplianceController.class)
-@Import({ExceptionHandlerConfig.class, ApplianceControllerTest.HouseClock.class})
+@Import(ExceptionHandlerConfig.class)
 class ApplianceControllerTest {
 
-    private static final Instant T0 = Instant.parse("2026-10-24T08:00:00Z");
-    private static final CycleThresholds THRESHOLDS = new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5));
-    private static final Appliance DISHWASHER = new Appliance(51, "Dishwasher", RoomName.KITCHEN, "192.0.2.51", 0, 1, THRESHOLDS);
-    private static final Appliance DRYER = new Appliance(31, "Dryer", RoomName.BOILER, "192.0.2.31", 0, 1, THRESHOLDS);
+    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 24, 10, 0);
 
     @Autowired
     private WebTestClient webTestClient;
 
     @MockitoBean
-    private ApplianceMonitor applianceMonitor;
-    @MockitoBean
-    private ApplianceRunRepository applianceRunRepository;
-    @MockitoBean
-    private ApplianceSampleRepository applianceSampleRepository;
+    private ApplianceService applianceService;
 
     @Test
     void should_answer_every_appliance_leaving_out_what_is_not_known() {
-        when(applianceMonitor.statuses()).thenReturn(List.of(
-            new ApplianceStatus(DRYER, new CycleView(ApplianceState.FINISHED, T0, T0.plusSeconds(3600), T0.plusSeconds(3780)),
-                0.8, T0.plusSeconds(3800), true),
-            new ApplianceStatus(DISHWASHER, new CycleView(ApplianceState.IDLE, null, null, null), null, null, null)
-        ));
+        when(applianceService.appliances()).thenReturn(Mono.just(List.of(
+            new ApplianceReply(31, "Dryer", RoomName.BOILER, ApplianceState.FINISHED, 0.8, AT.plusSeconds(3800), AT,
+                AT.plusHours(1), AT.plusSeconds(3780), true),
+            new ApplianceReply(51, "Dishwasher", RoomName.KITCHEN, ApplianceState.IDLE, null, null, null, null, null, null)
+        )));
 
         webTestClient.get().uri("/")
             .exchange()
@@ -80,9 +65,10 @@ class ApplianceControllerTest {
     }
 
     @Test
-    void should_answer_one_appliance_running() {
-        when(applianceMonitor.status(51)).thenReturn(Optional.of(new ApplianceStatus(DISHWASHER,
-            new CycleView(ApplianceState.RUNNING, T0, null, null), 1987.5, T0.plusSeconds(600), true)));
+    void should_answer_one_appliance() {
+        when(applianceService.appliance(51)).thenReturn(Mono.just(
+            new ApplianceReply(51, "Dishwasher", RoomName.KITCHEN, ApplianceState.RUNNING, 1987.5, AT.plusMinutes(10), AT,
+                null, null, true)));
 
         webTestClient.get().uri("/51")
             .exchange()
@@ -94,28 +80,21 @@ class ApplianceControllerTest {
     }
 
     @Test
-    void should_refuse_an_appliance_it_does_not_watch_with_its_code() {
-        when(applianceMonitor.status(anyLong())).thenReturn(Optional.empty());
+    void should_answer_an_appliance_it_does_not_watch_with_its_code() {
+        when(applianceService.appliance(anyLong())).thenReturn(Mono.error(ApplianceException.notFound(99)));
 
         webTestClient.get().uri("/99")
             .exchange()
             .expectStatus().isNotFound()
             .expectBody()
             .jsonPath("$.errors[0].code").isEqualTo("NOT_FOUND_APPLIANCE");
-        webTestClient.get().uri("/99/runs?from=2026-10-01T00:00:00&to=2026-10-02T00:00:00")
-            .exchange()
-            .expectStatus().isNotFound();
     }
 
     @Test
-    void should_answer_the_runs_of_a_range_by_the_clock_of_the_house() {
-        when(applianceMonitor.status(51)).thenReturn(Optional.of(idle()));
-        when(applianceRunRepository.findByDeviceIdAndStartedAtGreaterThanEqualAndStartedAtLessThanOrderByStartedAt(
-            51, Instant.parse("2026-09-30T22:00:00Z"), Instant.parse("2026-10-24T22:00:00Z")))
-            .thenReturn(Flux.just(
-                ApplianceRunEntity.builder().id(3L).deviceId(51).startedAt(T0).finishedAt(T0.plusSeconds(7200))
-                    .energyWh(812L).maxWatts(2140).build(),
-                ApplianceRunEntity.builder().id(4L).deviceId(51).startedAt(T0.plusSeconds(36000)).build()));
+    void should_hand_the_range_of_the_runs_to_the_service() {
+        when(applianceService.runs(51, LocalDateTime.of(2026, 10, 1, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)))
+            .thenReturn(Flux.just(new RunReply(3, AT, AT.plusHours(2), 812L, 2140, null),
+                new RunReply(4, AT.plusHours(10), null, null, null, null)));
 
         webTestClient.get().uri("/51/runs?from=2026-10-01T00:00:00&to=2026-10-25T00:00:00")
             .exchange()
@@ -129,48 +108,35 @@ class ApplianceControllerTest {
     }
 
     @Test
-    void should_answer_the_samples_of_a_range() {
-        when(applianceMonitor.status(51)).thenReturn(Optional.of(idle()));
-        when(applianceSampleRepository.findByDeviceIdAndAtGreaterThanEqualAndAtLessThanOrderByAt(
-            51, Instant.parse("2026-10-23T22:00:00Z"), Instant.parse("2026-10-24T22:00:00Z")))
-            .thenReturn(Flux.just(new ApplianceSampleEntity(1L, 51, T0, new BigDecimal("511.69"))));
+    void should_hand_the_range_of_the_samples_to_the_service() {
+        when(applianceService.samples(51, LocalDateTime.of(2026, 10, 24, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)))
+            .thenReturn(Flux.just(new SampleReply(AT, new BigDecimal("511.69"))));
 
         webTestClient.get().uri("/51/samples?from=2026-10-24T00:00:00&to=2026-10-25T00:00:00")
             .exchange()
             .expectStatus().isOk()
             .expectBody().json("""
                 [{"at": "2026-10-24T10:00:00", "watts": 511.69}]""", JsonCompareMode.STRICT);
-        verify(applianceSampleRepository).findByDeviceIdAndAtGreaterThanEqualAndAtLessThanOrderByAt(
-            51, Instant.parse("2026-10-23T22:00:00Z"), Instant.parse("2026-10-24T22:00:00Z"));
+        verify(applianceService).samples(51, LocalDateTime.of(2026, 10, 24, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0));
     }
 
-    @ParameterizedTest
-    @CsvSource({
-        // to before from, longer than allowed, an offset the pattern does not take
-        "runs, 2026-10-02T00:00:00, 2026-10-01T00:00:00",
-        "runs, 2026-09-01T00:00:00, 2026-10-02T00:00:01",
-        "samples, 2026-10-01T00:00:00, 2026-10-03T00:00:01",
-        "samples, 2026-10-01T00:00:00+02:00, 2026-10-02T00:00:00"
-    })
-    void should_refuse_a_range_that_breaks_a_rule(final String what, final String from, final String to) {
-        when(applianceMonitor.status(51)).thenReturn(Optional.of(idle()));
+    //a range the service refuses is a 400
+    @Test
+    void should_answer_a_refused_range_with_400() {
+        when(applianceService.runs(anyLong(), any(), any()))
+            .thenReturn(Flux.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "to must be after from")));
 
-        webTestClient.get().uri("/51/{what}?from={from}&to={to}", what, from, to)
+        webTestClient.get().uri("/51/runs?from=2026-10-02T00:00:00&to=2026-10-01T00:00:00")
             .exchange()
             .expectStatus().isBadRequest();
-        verifyNoInteractions(applianceRunRepository, applianceSampleRepository);
     }
 
-    private static ApplianceStatus idle() {
-        return new ApplianceStatus(DISHWASHER, new CycleView(ApplianceState.IDLE, null, null, null), null, null, null);
-    }
-
-    @TestConfiguration
-    static class HouseClock {
-
-        @Bean
-        Clock clock() {
-            return Clock.fixed(T0, ZoneId.of("Europe/Warsaw"));
-        }
+    //an offset is not the clock of the house - refused before the service is asked
+    @Test
+    void should_refuse_a_bound_with_an_offset() {
+        webTestClient.get().uri("/51/samples?from={from}&to={to}", "2026-10-01T00:00:00+02:00", "2026-10-02T00:00:00")
+            .exchange()
+            .expectStatus().isBadRequest();
+        verifyNoInteractions(applianceService);
     }
 }
