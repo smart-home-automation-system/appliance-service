@@ -35,25 +35,34 @@ through the `household` category of `notification-service` - a JSON `HouseholdNo
 (`smart-home-sdk` 1.13.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
 `notification-service` words it in Polish for the household's Discord channel, SMS and Web Push.
 
-**This is the scaffold (HAS-277).** The service starts, connects nothing it does not need yet and
-serves the Actuator only. What comes next:
+**Since HAS-278 it reads the plugs and detects the cycles.** The appliances are devices of the
+registry of `database-service` - the kind `appliance` with its `ApplianceSettings` - read at the
+start and every 5 minutes; a Gen1 plug is polled every 30 s (`GET /meter/<channel>`, the
+`meter` of `shelly-client` 2.2.0). Each valid sample is stored and given to the detector of its
+appliance:
+
+| From | To | When |
+|---|---|---|
+| `idle` | `running` | the draw stays above `runningAboveWatts` for a minute - the cycle starts at the first sample above |
+| `running` | `finishing` | a sample below `idleBelowWatts` |
+| `finishing` | `running` | a sample at or above `idleBelowWatts` - a pause of a washing machine |
+| `finishing` | `finished` | `finishedAfterMinutes` below `idleBelowWatts`, when the cycle lasted at least `minRunMinutes`; a shorter one is discarded, back to `idle`, nobody is told |
+| `finished` | `idle` | acknowledged (HAS-279) or claimed by a tag (HAS-343) |
+| `finished` | `running` | a new cycle starts |
+
+An invalid sample (`is_valid: false`) or a plug that does not answer keeps the state. What comes
+next:
 
 | Task | What |
 |---|---|
-| HAS-278 | power sampling of the plugs (Shelly Gen1, polled) and the cycle detection, the first table |
 | HAS-279 | the notifications, the reminders and the acknowledgement |
 | HAS-280 | the availability monitor of the plugs |
 | HAS-281 | the routes of `api-gateway-service` |
 
-The appliances are devices of the registry of `database-service` - the kind `appliance` with its
-`ApplianceSettings` (thresholds of the draw, the times of a cycle, the reminders, the quiet time) -
-read through `internal.service.database`.
-
 # Run locally
 
-- Build: `mvn verify` (JDK 21). No test needs Docker yet; the first test of PostgreSQL-only SQL
-  (Testcontainers, the dependencies are in the pom) will - from then on `mvn verify` needs a
-  running Docker.
+- Build: `mvn verify` (JDK 21) - **needs a running Docker**: `ApplianceRepositoriesTest` runs the
+  migrations on a PostgreSQL 17 in Testcontainers.
 - Ports: local profile `6013` (management `8013`); in the deployed `home` profile the service
   listens on `6200` and Actuator on `8200` like every service in the cluster. The ingress routes
   only 6200, so Actuator is reachable inside the cluster only - where the Kubernetes probes hit
@@ -74,10 +83,30 @@ read through `internal.service.database`.
 
 # API
 
-None yet - the endpoints come with HAS-279, their routes with HAS-281.
+Under the base path `/home/appliance`; reads only, not routed by the gateway before HAS-281. The
+times are the clock of the house without an offset; a field not known is left out.
+
+| Method | Path | Answer |
+|---|---|---|
+| `GET` | `/home/appliance` | every watched appliance: `id`, `name`, `room`, `state` (`idle`, `running`, `finishing`, `finished`), `watts` and `sampledAt` (the last valid reading), `runningSince`, `finishedAt` (the fall of the draw), `awaitingSince` (the moment the end was certain), `reachable` (the last poll answered) |
+| `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
+| `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt` |
+| `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
+
+`from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
+longer range is a `400`. The history is answered for a watched appliance only: one
+switched off or removed in the registry is a `404`, though its rows stay.
 
 # Database
 
 `home-automation-appliance`, owned by `doadmin` like every database of the cluster: the user of
 the services needs `GRANT USAGE, CREATE ON SCHEMA public` before the first start, or Flyway fails
-with `permission denied for schema public`. No migration yet - the first table comes with HAS-278.
+with `permission denied for schema public`.
+
+- `appliance_run` (V1) - one row per cycle, inserted when it starts and completed when it has
+  finished; a run below `minRunMinutes` is deleted. `acknowledged_at` and `reminders_sent` belong
+  to HAS-279.
+- `appliance_sample` (V2) - every valid sample, kept `appliance.sample-retention` (14 days, a bare
+  number is days, 2-90) and deleted every night at 03:20.
+
+Times are `timestamptz`.

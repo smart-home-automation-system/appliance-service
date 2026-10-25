@@ -57,6 +57,11 @@ cholewa:
     enabled: true
     env: prod
 
+# how long the samples of the plugs are kept (ApplianceProperties): a bare number is days, 2 to 90; deleted
+# every night at 03:20
+appliance:
+  sample-retention: 14d
+
 internal:
   service:
     database: http://database-service:6200
