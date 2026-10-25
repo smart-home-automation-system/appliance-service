@@ -1,13 +1,18 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.cycle.ApplianceState;
 import cloud.cholewa.appliance.cycle.CycleView;
 import cloud.cholewa.appliance.cycle.RunStore;
+import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
 import cloud.cholewa.appliance.database.model.ApplianceSampleEntity;
 import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
+import cloud.cholewa.appliance.error.ApplianceException;
 import cloud.cholewa.appliance.power.PowerReader;
 import cloud.cholewa.appliance.power.PowerSample;
 import cloud.cholewa.appliance.registry.Appliance;
 import cloud.cholewa.appliance.registry.ApplianceRegistry;
+import cloud.cholewa.appliance.reminder.HouseholdNotifier;
+import cloud.cholewa.appliance.reminder.Reminders;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -16,6 +21,8 @@ import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +32,9 @@ import java.util.concurrent.ConcurrentHashMap;
 //The appliances the service watches and the cycle of each (HAS-278). The registry decides which there are
 //(refresh, every 5 min): a new one starts from its latest run, one that is gone is forgotten - its rows
 //stay. Every 30 s the plugs are read (sample): a valid sample is stored and given to the detector of its
-//appliance, a transition is written to appliance_run. Neither signals an error
+//appliance, a transition is written to appliance_run. Every minute each finished cycle is checked for its
+//messages (remind, HAS-279) - the finish is announced at the first check, at most a minute after the end:
+//not in the sampling pass, which a slow broker must not stall. None signals an error; acknowledge answers the API
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -38,6 +47,9 @@ public class ApplianceMonitor {
     private final RunStore runStore;
     private final PowerReader powerReader;
     private final ApplianceSampleRepository applianceSampleRepository;
+    private final Reminders reminders;
+    private final HouseholdNotifier householdNotifier;
+    private final Clock clock;
     private final Map<Long, TrackedAppliance> tracked = new ConcurrentHashMap<>();
 
     public Mono<Void> refresh() {
@@ -56,6 +68,46 @@ public class ApplianceMonitor {
                 .map(sample -> new Polled(appliance, sample)), READ_CONCURRENCY)
             .concatMap(this::take)
             .then();
+    }
+
+    //the reminders of every finished cycle nobody acknowledged, one appliance after the other
+    public Mono<Void> remind() {
+        return Flux.fromIterable(List.copyOf(tracked.values()))
+            .filter(appliance -> appliance.runId() != null
+                && appliance.detector().view().state() == ApplianceState.FINISHED)
+            .concatMap(appliance -> reminders.check(appliance.appliance(), appliance.runId()))
+            .then();
+    }
+
+    //the finished cycle of an appliance acknowledged: the row first, so that a failed write leaves the cycle
+    //waiting (and reminded), then the detector, then the message - which never fails the acknowledgement.
+    //Not watched: 404; nothing finished waiting: 409
+    public Mono<Void> acknowledge(final long id) {
+        return Mono.defer(() -> {
+            final TrackedAppliance appliance = tracked.get(id);
+            if (appliance == null) {
+                return Mono.error(ApplianceException.notFound(id));
+            }
+            final Long runId = appliance.runId();
+            if (runId == null || appliance.detector().view().state() != ApplianceState.FINISHED) {
+                return Mono.error(ApplianceException.nothingToAcknowledge(id));
+            }
+            final Instant now = Instant.now(clock);
+            //a row gone from the database leaves nothing to remind either: the cycle is acknowledged in memory
+            return runStore.acknowledge(runId, now)
+                .map(ApplianceRunEntity::remindersSent)
+                .defaultIfEmpty(0)
+                .flatMap(remindersSent -> {
+                    //the detector of a cycle the sampling pass replaced meanwhile stays as it is, with its row
+                    if (appliance.detector().acknowledge().isEmpty()) {
+                        return Mono.empty();
+                    }
+                    log.info("{} ({}): acknowledged", appliance.appliance().name(), id);
+                    appliance.clearRunId(runId);
+                    return householdNotifier.acknowledged(appliance.appliance(), now, remindersSent);
+                })
+                .then();
+        });
     }
 
     public List<ApplianceStatus> statuses() {

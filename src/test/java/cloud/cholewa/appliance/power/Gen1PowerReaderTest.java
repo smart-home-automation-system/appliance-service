@@ -2,6 +2,7 @@ package cloud.cholewa.appliance.power;
 
 import cloud.cholewa.appliance.cycle.CycleThresholds;
 import cloud.cholewa.appliance.registry.Appliance;
+import cloud.cholewa.appliance.reminder.ReminderSettings;
 import cloud.cholewa.home.model.RoomName;
 import cloud.cholewa.shelly.http.ShellyGen1Client;
 import cloud.cholewa.shelly.model.Gen1Meter;
@@ -11,6 +12,7 @@ import reactor.test.StepVerifier;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.time.Instant;
 import java.time.ZoneId;
 
@@ -21,7 +23,7 @@ class Gen1PowerReaderTest {
 
     private static final Instant NOW = Instant.parse("2026-10-24T08:00:00Z");
     private static final Appliance DISHWASHER = new Appliance(51, "Dishwasher", RoomName.KITCHEN, "192.0.2.51", 0, 1,
-        new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5)));
+        new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5)), new ReminderSettings(Duration.ofMinutes(30), 4, LocalTime.of(23, 0), LocalTime.of(7, 0)));
 
     private final ShellyGen1Client shelly = mock(ShellyGen1Client.class);
     private final Gen1PowerReader sut = new Gen1PowerReader(shelly, Clock.fixed(NOW, ZoneId.of("Europe/Warsaw")));

@@ -13,7 +13,7 @@ class ApplianceErrorTest {
 
     @Test
     void should_keep_the_codes_of_the_errors() {
-        assertThat(Arrays.stream(ApplianceError.values()).map(ErrorId::codeOf)).containsExactly("NOT_FOUND_APPLIANCE");
+        assertThat(Arrays.stream(ApplianceError.values()).map(ErrorId::codeOf)).containsExactly("NOT_FOUND_APPLIANCE", "NOTHING_TO_ACKNOWLEDGE");
     }
 
     @Test

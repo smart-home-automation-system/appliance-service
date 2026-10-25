@@ -1,6 +1,7 @@
 package cloud.cholewa.appliance.registry;
 
 import cloud.cholewa.appliance.cycle.CycleThresholds;
+import cloud.cholewa.appliance.reminder.ReminderSettings;
 import cloud.cholewa.home.model.ApplianceSettings;
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.home.model.RoomName;
@@ -10,6 +11,7 @@ import cloud.cholewa.home.model.SmartVendor;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.LocalTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,7 +28,8 @@ class ApplianceMapperTest {
 
         assertThat(ApplianceMapper.map(device)).isEqualTo(new ApplianceMapper.Watched(new Appliance(
             51, "Dishwasher", RoomName.KITCHEN, "192.0.2.51", 0, 1,
-            new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5)))));
+            new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5)),
+            new ReminderSettings(Duration.ofMinutes(30), 3, LocalTime.of(22, 0), LocalTime.of(7, 0)))));
     }
 
     @Test

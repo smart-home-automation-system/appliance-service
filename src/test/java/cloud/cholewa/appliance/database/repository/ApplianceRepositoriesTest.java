@@ -80,6 +80,22 @@ class ApplianceRepositoriesTest {
             .verifyComplete();
     }
 
+    //V3: the messages of a finished cycle
+    @Test
+    void should_store_the_messages_of_a_cycle() {
+        final ApplianceRunEntity run = runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0).build()).block();
+
+        runs.save(run.toBuilder().notifiedAt(T0.plusSeconds(60)).lastMessageAt(T0.plusSeconds(1860)).remindersSent(1).build()).block();
+
+        runs.findById(run.id()).as(StepVerifier::create)
+            .assertNext(read -> {
+                assertThat(read.notifiedAt()).isEqualTo(T0.plusSeconds(60));
+                assertThat(read.lastMessageAt()).isEqualTo(T0.plusSeconds(1860));
+                assertThat(read.remindersSent()).isEqualTo(1);
+            })
+            .verifyComplete();
+    }
+
     @Test
     void should_find_the_latest_run_of_an_appliance() {
         runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0).build()).block();

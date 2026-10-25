@@ -47,6 +47,12 @@ public class ApplianceService {
         return watched(id).map(this::reply);
     }
 
+    //the finished cycle acknowledged (HAS-279) - a mute meant for the administrator once the tag claims of
+    //HAS-343 acknowledge for the members: 404 not watched, 409 NOTHING_TO_ACKNOWLEDGE when nothing waits
+    public Mono<Void> acknowledge(final long id) {
+        return applianceMonitor.acknowledge(id);
+    }
+
     //the cycles that started in [from, to), at most 31 days
     public Flux<RunReply> runs(final long id, final LocalDateTime from, final LocalDateTime to) {
         return watched(id).flatMapMany(status -> {

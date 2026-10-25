@@ -6,9 +6,12 @@ import cloud.cholewa.appliance.api.model.SampleReply;
 import cloud.cholewa.appliance.service.ApplianceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -17,7 +20,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 //The read API of the appliances (HAS-278), under the base path /home/appliance; routed by the gateway with
-//HAS-281. Reads only - the acknowledgement is HAS-279's. Takes the request and hands it to ApplianceService
+//HAS-281. Reads, and the acknowledgement of a finished cycle (HAS-279). Takes the request and hands it to
+//ApplianceService
 @RestController
 @RequiredArgsConstructor
 public class ApplianceController {
@@ -37,6 +41,13 @@ public class ApplianceController {
     @GetMapping("{id}")
     Mono<ApplianceReply> appliance(@PathVariable final long id) {
         return applianceService.appliance(id);
+    }
+
+    //204 - the reminders stop; 409 NOTHING_TO_ACKNOWLEDGE when no finished cycle waits
+    @PostMapping("{id}/acknowledge")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    Mono<Void> acknowledge(@PathVariable final long id) {
+        return applianceService.acknowledge(id);
     }
 
     @GetMapping("{id}/runs")
