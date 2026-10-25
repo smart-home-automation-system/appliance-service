@@ -5,11 +5,17 @@ import cloud.cholewa.appliance.cycle.CycleDetector;
 import cloud.cholewa.appliance.cycle.CycleThresholds;
 import cloud.cholewa.appliance.cycle.RunStore;
 import cloud.cholewa.appliance.cycle.Transition;
+import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
 import cloud.cholewa.appliance.database.model.ApplianceSampleEntity;
 import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
+import cloud.cholewa.appliance.error.ApplianceError;
+import cloud.cholewa.appliance.error.ApplianceException;
 import cloud.cholewa.appliance.power.PowerReader;
 import cloud.cholewa.appliance.power.PowerSample;
 import cloud.cholewa.appliance.registry.Appliance;
+import cloud.cholewa.appliance.reminder.HouseholdNotifier;
+import cloud.cholewa.appliance.reminder.ReminderSettings;
+import cloud.cholewa.appliance.reminder.Reminders;
 import cloud.cholewa.appliance.registry.ApplianceRegistry;
 import cloud.cholewa.home.model.RoomName;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,12 +25,16 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
@@ -37,18 +47,23 @@ class ApplianceMonitorTest {
 
     private static final Instant T0 = Instant.parse("2026-10-24T08:00:00Z");
     private static final CycleThresholds DRYER = new CycleThresholds(50, 5, Duration.ofMinutes(15), Duration.ofMinutes(3));
-    private static final Appliance DRYER_PLUG = new Appliance(31, "Dryer", RoomName.BOILER, "192.0.2.31", 0, 1, DRYER);
-    private static final Appliance WASHER_PLUG = new Appliance(32, "Washing machine", RoomName.BOILER, "192.0.2.32", 0, 1, DRYER);
+    private static final ReminderSettings REMINDERS = new ReminderSettings(Duration.ofMinutes(30), 4, LocalTime.of(23, 0), LocalTime.of(7, 0));
+    private static final Appliance DRYER_PLUG = new Appliance(31, "Dryer", RoomName.BOILER, "192.0.2.31", 0, 1, DRYER, REMINDERS);
+    private static final Appliance WASHER_PLUG = new Appliance(32, "Washing machine", RoomName.BOILER, "192.0.2.32", 0, 1, DRYER, REMINDERS);
 
     private final ApplianceRegistry registry = mock(ApplianceRegistry.class);
     private final RunStore runStore = mock(RunStore.class);
     private final PowerReader reader = mock(PowerReader.class);
     private final ApplianceSampleRepository samples = mock(ApplianceSampleRepository.class);
-    private final ApplianceMonitor sut = new ApplianceMonitor(registry, runStore, reader, samples);
+    private final Reminders reminders = mock(Reminders.class);
+    private final HouseholdNotifier notifier = mock(HouseholdNotifier.class);
+    private final ApplianceMonitor sut = new ApplianceMonitor(registry, runStore, reader, samples, reminders, notifier,
+        Clock.fixed(T0.plus(Duration.ofHours(3)), ZoneId.of("Europe/Warsaw")));
 
     @BeforeEach
     void setUp() {
         when(samples.save(any())).thenAnswer(call -> Mono.just(call.getArgument(0)));
+        when(reminders.check(any(), anyLong())).thenReturn(Mono.empty());
     }
 
     @Test
@@ -95,7 +110,7 @@ class ApplianceMonitorTest {
 
     @Test
     void should_forget_an_appliance_the_registry_no_longer_has_and_take_its_new_settings() {
-        final Appliance moved = new Appliance(32, "Washer", RoomName.BATHROOM_DOWN, "192.0.2.33", 0, 1, DRYER);
+        final Appliance moved = new Appliance(32, "Washer", RoomName.BATHROOM_DOWN, "192.0.2.33", 0, 1, DRYER, REMINDERS);
         when(registry.read()).thenReturn(Mono.just(List.of(DRYER_PLUG, WASHER_PLUG)), Mono.just(List.of(moved)));
         when(runStore.restore(anyLong(), any())).thenReturn(Mono.just(new RunStore.Restored(CycleDetector.idle(), null)));
 
@@ -154,6 +169,8 @@ class ApplianceMonitorTest {
         sut.sample().as(StepVerifier::create).verifyComplete();
 
         verify(runStore).write(31, 5L, new Transition.Finished(T0, T0.plus(Duration.ofMinutes(40)), 0, 0));
+        //announced by the minute check, never by the sampling pass a slow broker would stall
+        verify(reminders, never()).check(any(), anyLong());
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHED);
     }
 
@@ -186,6 +203,79 @@ class ApplianceMonitorTest {
         sut.sample().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHING);
+    }
+
+    //HAS-279: every finished cycle with a row is checked for its reminders, nothing else
+    @Test
+    void should_check_the_reminders_of_the_finished_cycles_only() {
+        when(registry.read()).thenReturn(Mono.just(List.of(DRYER_PLUG, WASHER_PLUG)));
+        when(runStore.restore(31, DRYER)).thenReturn(Mono.just(new RunStore.Restored(finished(), 5L)));
+        when(runStore.restore(32, DRYER)).thenReturn(Mono.just(new RunStore.Restored(CycleDetector.running(T0), 6L)));
+        sut.refresh().as(StepVerifier::create).verifyComplete();
+
+        sut.remind().as(StepVerifier::create).verifyComplete();
+
+        verify(reminders).check(DRYER_PLUG, 5L);
+        verify(reminders, never()).check(eq(WASHER_PLUG), anyLong());
+    }
+
+    @Test
+    void should_acknowledge_a_finished_cycle_once() {
+        watch(DRYER_PLUG, finished(), 5L);
+        final Instant now = T0.plus(Duration.ofHours(3));
+        when(runStore.acknowledge(5L, now)).thenReturn(Mono.just(ApplianceRunEntity.builder().id(5L).deviceId(31)
+            .startedAt(T0).remindersSent(2).acknowledgedAt(now).build()));
+        when(notifier.acknowledged(DRYER_PLUG, now, 2)).thenReturn(Mono.just(true));
+
+        sut.acknowledge(31).as(StepVerifier::create).verifyComplete();
+
+        verify(notifier).acknowledged(DRYER_PLUG, now, 2);
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
+        sut.acknowledge(31).as(StepVerifier::create)
+            .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
+            .verify();
+    }
+
+    @Test
+    void should_refuse_to_acknowledge_what_does_not_wait() {
+        watch(DRYER_PLUG, CycleDetector.running(T0), 5L);
+
+        sut.acknowledge(31).as(StepVerifier::create)
+            .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
+            .verify();
+        sut.acknowledge(99).as(StepVerifier::create)
+            .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOT_FOUND_APPLIANCE))
+            .verify();
+        verify(runStore, never()).acknowledge(anyLong(), any());
+    }
+
+    //a row gone from the database: nothing remains to remind, the cycle is acknowledged in memory
+    @Test
+    void should_acknowledge_a_cycle_whose_row_is_gone() {
+        watch(DRYER_PLUG, finished(), 5L);
+        when(runStore.acknowledge(eq(5L), any())).thenReturn(Mono.empty());
+        when(notifier.acknowledged(eq(DRYER_PLUG), any(), eq(0))).thenReturn(Mono.just(true));
+
+        sut.acknowledge(31).as(StepVerifier::create).verifyComplete();
+
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
+        verify(notifier).acknowledged(eq(DRYER_PLUG), any(), eq(0));
+    }
+
+    //the row first: a failed write leaves the cycle waiting and reminded, and nobody is told it was acknowledged
+    @Test
+    void should_keep_the_cycle_waiting_when_the_acknowledgement_cannot_be_stored() {
+        watch(DRYER_PLUG, finished(), 5L);
+        when(runStore.acknowledge(eq(5L), any())).thenReturn(Mono.error(new IllegalStateException("database away")));
+
+        sut.acknowledge(31).as(StepVerifier::create).verifyError(IllegalStateException.class);
+
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHED);
+        verify(notifier, never()).acknowledged(any(), any(), anyInt());
+    }
+
+    private static CycleDetector finished() {
+        return CycleDetector.finished(T0, T0.plus(Duration.ofHours(2)), T0.plus(Duration.ofMinutes(125)));
     }
 
     private void watch(final Appliance appliance, final CycleDetector detector, final Long runId) {

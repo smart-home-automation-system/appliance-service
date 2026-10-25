@@ -15,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -131,6 +132,53 @@ class RunStoreTest {
         when(repository.findById(5L)).thenReturn(Mono.error(new IllegalStateException("database away")));
 
         sut.write(7, 5L, new Transition.Finished(T0, END, 812, 2140)).as(StepVerifier::create).expectNext(5L).verifyComplete();
+        verify(repository, never()).save(any());
+    }
+
+    //HAS-279: a finished cycle nobody acknowledged, ended by a new one, is acknowledged when the new one started
+    @Test
+    void should_close_a_replaced_cycle_before_storing_the_new_one() {
+        final Instant second = END.plus(Duration.ofHours(1));
+        when(repository.findById(5L)).thenReturn(Mono.just(run(END, null)));
+
+        sut.write(7, 5L, new Transition.Started(second, true)).as(StepVerifier::create).expectNext(9L).verifyComplete();
+
+        final ArgumentCaptor<ApplianceRunEntity> saved = ArgumentCaptor.forClass(ApplianceRunEntity.class);
+        verify(repository, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues().get(0)).isEqualTo(run(END, second));
+        assertThat(saved.getAllValues().get(1)).isEqualTo(ApplianceRunEntity.builder().deviceId(7).startedAt(second).build());
+    }
+
+    @Test
+    void should_store_the_new_cycle_when_the_replaced_one_cannot_be_closed() {
+        when(repository.findById(5L)).thenReturn(Mono.error(new IllegalStateException("database away")));
+
+        sut.write(7, 5L, new Transition.Started(END.plusSeconds(60), true)).as(StepVerifier::create).expectNext(9L).verifyComplete();
+    }
+
+    @Test
+    void should_write_the_messages_of_a_cycle() {
+        when(repository.findById(5L)).thenReturn(Mono.just(run(END, null)));
+
+        sut.notified(5L, END.plusSeconds(1)).as(StepVerifier::create).verifyComplete();
+        sut.reminded(5L, 2, END.plusSeconds(3600)).as(StepVerifier::create).verifyComplete();
+
+        final ArgumentCaptor<ApplianceRunEntity> saved = ArgumentCaptor.forClass(ApplianceRunEntity.class);
+        verify(repository, times(2)).save(saved.capture());
+        assertThat(saved.getAllValues().get(0).notifiedAt()).isEqualTo(END.plusSeconds(1));
+        assertThat(saved.getAllValues().get(0).lastMessageAt()).isEqualTo(END.plusSeconds(1));
+        assertThat(saved.getAllValues().get(1).remindersSent()).isEqualTo(2);
+        assertThat(saved.getAllValues().get(1).lastMessageAt()).isEqualTo(END.plusSeconds(3600));
+    }
+
+    //acknowledged twice keeps the first time
+    @Test
+    void should_keep_the_first_acknowledgement() {
+        when(repository.findById(5L)).thenReturn(Mono.just(run(END, END.plusSeconds(60))));
+
+        sut.acknowledge(5L, END.plusSeconds(600)).as(StepVerifier::create)
+            .assertNext(run -> assertThat(run.acknowledgedAt()).isEqualTo(END.plusSeconds(60)))
+            .verifyComplete();
         verify(repository, never()).save(any());
     }
 

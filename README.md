@@ -50,12 +50,20 @@ appliance:
 | `finished` | `idle` | acknowledged (HAS-279) or claimed by a tag (HAS-343) |
 | `finished` | `running` | a new cycle starts |
 
-An invalid sample (`is_valid: false`) or a plug that does not answer keeps the state. What comes
-next:
+An invalid sample (`is_valid: false`) or a plug that does not answer keeps the state.
+
+**Since HAS-279 the household is told.** A finished cycle is announced within a minute of its end -
+quiet hours or not, with the time of the end - as `appliance finished` of the `household` category (the JSON `HouseholdNotification`, the name of
+the appliance from the registry as its subject, `acknowledgePath` `/room`); `notification-service`
+words it in Polish for Discord, SMS and Web Push. Then a reminder every `reminderEveryMinutes` after
+the last message, at most `maxReminders`, never between `quietFrom` and `quietTo` (a reminder due
+then waits for their end), until the cycle is acknowledged - `POST /home/appliance/{id}/acknowledge`,
+which publishes `appliance acknowledged`. A new cycle on an unacknowledged appliance closes the old
+one as acknowledged, without a message. What was sent is in the row of the cycle, so a restart sends
+nothing twice, and a message that did not get through is sent again a minute later. What comes next:
 
 | Task | What |
 |---|---|
-| HAS-279 | the notifications, the reminders and the acknowledgement |
 | HAS-280 | the availability monitor of the plugs |
 | HAS-281 | the routes of `api-gateway-service` |
 
@@ -83,7 +91,7 @@ next:
 
 # API
 
-Under the base path `/home/appliance`; reads only, not routed by the gateway before HAS-281. The
+Under the base path `/home/appliance`; not routed by the gateway before HAS-281. The
 times are the clock of the house without an offset; a field not known is left out.
 
 | Method | Path | Answer |
@@ -92,6 +100,7 @@ times are the clock of the house without an offset; a field not known is left ou
 | `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
 | `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt` |
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
+| `POST` | `/home/appliance/{id}/acknowledge` | `204` - the finished cycle acknowledged, its reminders stop (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished cycle waits, `404 NOT_FOUND_APPLIANCE` |
 
 `from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
 longer range is a `400`. The history is answered for a watched appliance only: one
@@ -104,8 +113,8 @@ the services needs `GRANT USAGE, CREATE ON SCHEMA public` before the first start
 with `permission denied for schema public`.
 
 - `appliance_run` (V1) - one row per cycle, inserted when it starts and completed when it has
-  finished; a run below `minRunMinutes` is deleted. `acknowledged_at` and `reminders_sent` belong
-  to HAS-279.
+  finished; a run below `minRunMinutes` is deleted. V3 adds its messages: `notified_at` (the finish
+  announced), `last_message_at`, with `reminders_sent` and `acknowledged_at` of V1.
 - `appliance_sample` (V2) - every valid sample, kept `appliance.sample-retention` (14 days, a bare
   number is days, 2-90) and deleted every night at 03:20.
 

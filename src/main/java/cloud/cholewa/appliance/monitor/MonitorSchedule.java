@@ -20,12 +20,20 @@ public class MonitorSchedule {
     static final Duration SAMPLE_LIMIT = Duration.ofSeconds(25);
     //one read of the registry with a 5 s response timeout, and the latest run of a new appliance
     static final Duration REFRESH_LIMIT = Duration.ofMinutes(4);
+    //a read of the row and at most one message per finished cycle, each message cut off after 30 s - with a
+    //slow broker the pass may end before the last appliance, which the next minute checks again
+    static final Duration REMIND_LIMIT = Duration.ofSeconds(50);
 
     private final ApplianceMonitor applianceMonitor;
 
     @Scheduled(initialDelayString = "PT0S", fixedDelayString = "PT5M")
     Mono<Void> refresh() {
         return ScheduledPass.bounded("appliance registry refresh", REFRESH_LIMIT, applianceMonitor::refresh);
+    }
+
+    @Scheduled(initialDelayString = "PT1M", fixedDelayString = "PT1M")
+    Mono<Void> remind() {
+        return ScheduledPass.bounded("appliance reminders", REMIND_LIMIT, applianceMonitor::remind);
     }
 
     @Scheduled(initialDelayString = "PT15S", fixedDelayString = "PT30S")

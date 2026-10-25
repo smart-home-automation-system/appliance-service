@@ -7,7 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.function.UnaryOperator;
 
 //The cycles in appliance_run: the state an appliance starts from after a restart of the pod, and what a
 //transition writes. A write that fails is a WARN and changes nothing in memory - the cycle goes on; the
@@ -43,10 +45,12 @@ public class RunStore {
     //the id of the row of the cycle after the transition - null when there is none
     public Mono<Long> write(final long deviceId, final Long runId, final Transition transition) {
         return switch (transition) {
-            case Transition.Started started -> applianceRunRepository.save(ApplianceRunEntity.builder()
+            case Transition.Started started -> closeReplaced(deviceId, runId, started)
+                //deferred: the new row only once the replaced one is closed
+                .then(Mono.defer(() -> applianceRunRepository.save(ApplianceRunEntity.builder()
                     .deviceId(deviceId)
                     .startedAt(started.startedAt())
-                    .build())
+                    .build())))
                 .map(ApplianceRunEntity::id)
                 .onErrorResume(e -> failed("the start of a cycle", deviceId, e, null));
             case Transition.Finished finished -> finish(deviceId, runId, finished);
@@ -57,6 +61,46 @@ public class RunStore {
                     .onErrorResume(e -> failed("the removal of a run below the minimum", deviceId, e, null));
             case Transition.Acknowledged acknowledged -> Mono.empty();
         };
+    }
+
+    //the messages of a finished cycle (HAS-279): the household was told it has finished
+    public Mono<Void> notified(final long runId, final Instant at) {
+        return update(runId, run -> run.toBuilder().notifiedAt(at).lastMessageAt(at).build());
+    }
+
+    //the reminder number "count" went out
+    public Mono<Void> reminded(final long runId, final int count, final Instant at) {
+        return update(runId, run -> run.toBuilder().remindersSent(count).lastMessageAt(at).build());
+    }
+
+    //acknowledged - the reminders stop; a row acknowledged already keeps its first time
+    public Mono<ApplianceRunEntity> acknowledge(final long runId, final Instant at) {
+        return applianceRunRepository.findById(runId)
+            .flatMap(run -> run.acknowledgedAt() != null
+                ? Mono.just(run)
+                : applianceRunRepository.save(run.toBuilder().acknowledgedAt(at).build()));
+    }
+
+    public Mono<ApplianceRunEntity> find(final long runId) {
+        return applianceRunRepository.findById(runId);
+    }
+
+    private Mono<Void> update(final long runId, final UnaryOperator<ApplianceRunEntity> change) {
+        return applianceRunRepository.findById(runId).map(change).flatMap(applianceRunRepository::save).then();
+    }
+
+    //a finished cycle nobody acknowledged, ended by a new one: acknowledged without a message when the new one
+    //started (HAS-279); a failure is a WARN - the new cycle is stored all the same
+    private Mono<Void> closeReplaced(final long deviceId, final Long runId, final Transition.Started started) {
+        if (!started.replacedUnacknowledged() || runId == null) {
+            return Mono.empty();
+        }
+        return acknowledge(runId, started.startedAt())
+            .then()
+            .onErrorResume(e -> {
+                log.warn("Could not close the replaced cycle {} of appliance {}: {}", runId, deviceId, e.toString());
+                return Mono.empty();
+            });
     }
 
     private Mono<Long> finish(final long deviceId, final Long runId, final Transition.Finished finished) {

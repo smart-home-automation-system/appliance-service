@@ -6,7 +6,7 @@ import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.Instant;
 
-//A row of appliance_run (V1): one cycle of an appliance; what is not known yet is null
+//A row of appliance_run (V1, V3): one cycle of an appliance and its messages; what is not known yet is null
 @Builder(toBuilder = true)
 @Table("appliance_run")
 public record ApplianceRunEntity(
@@ -18,6 +18,8 @@ public record ApplianceRunEntity(
     Long energyWh,
     Integer maxWatts,
     Instant acknowledgedAt,
-    int remindersSent
+    int remindersSent,
+    Instant notifiedAt,
+    Instant lastMessageAt
 ) {
 }

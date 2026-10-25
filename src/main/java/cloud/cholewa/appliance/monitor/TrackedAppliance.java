@@ -4,6 +4,7 @@ import cloud.cholewa.appliance.cycle.CycleDetector;
 import cloud.cholewa.appliance.power.PowerSample;
 import cloud.cholewa.appliance.registry.Appliance;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 //An appliance the service watches: what the registry says of it (replaced by every refresh), its detector,
@@ -42,6 +43,13 @@ final class TrackedAppliance {
 
     void runId(final Long runId) {
         this.runId.set(runId);
+    }
+
+    //the row of the acknowledged cycle forgotten - only if it is still the row of the appliance: the sampling
+    //pass may have stored the row of a new cycle meanwhile
+    void clearRunId(final Long acknowledged) {
+        //by value: compareAndSet compares references, and two boxed ids of one row are not the same Long
+        runId.updateAndGet(current -> Objects.equals(current, acknowledged) ? null : current);
     }
 
     void polled(final PowerSample sample) {

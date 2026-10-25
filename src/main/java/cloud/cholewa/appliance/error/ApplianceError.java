@@ -13,7 +13,10 @@ import lombok.RequiredArgsConstructor;
 public enum ApplianceError implements ErrorId {
 
     //no appliance of the registry the service watches has this id
-    NOT_FOUND_APPLIANCE("Appliance not found");
+    NOT_FOUND_APPLIANCE("Appliance not found"),
+
+    //the appliance has no finished cycle waiting to be acknowledged (HAS-279)
+    NOTHING_TO_ACKNOWLEDGE("Nothing to acknowledge");
 
     private final String description;
 }

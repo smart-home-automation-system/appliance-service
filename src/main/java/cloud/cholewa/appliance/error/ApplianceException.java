@@ -21,4 +21,9 @@ public class ApplianceException extends RuntimeException {
         return new ApplianceException(HttpStatus.NOT_FOUND, ApplianceError.NOT_FOUND_APPLIANCE,
             "No appliance with id " + id + " is watched");
     }
+
+    public static ApplianceException nothingToAcknowledge(final long id) {
+        return new ApplianceException(HttpStatus.CONFLICT, ApplianceError.NOTHING_TO_ACKNOWLEDGE,
+            "Appliance " + id + " has no finished cycle waiting to be acknowledged");
+    }
 }

@@ -120,6 +120,27 @@ class ApplianceControllerTest {
         verify(applianceService).samples(51, LocalDateTime.of(2026, 10, 24, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0));
     }
 
+    @Test
+    void should_acknowledge_with_204() {
+        when(applianceService.acknowledge(133)).thenReturn(Mono.empty());
+
+        webTestClient.post().uri("/133/acknowledge")
+            .exchange()
+            .expectStatus().isNoContent()
+            .expectBody().isEmpty();
+    }
+
+    @Test
+    void should_answer_409_when_nothing_waits_to_be_acknowledged() {
+        when(applianceService.acknowledge(133)).thenReturn(Mono.error(ApplianceException.nothingToAcknowledge(133)));
+
+        webTestClient.post().uri("/133/acknowledge")
+            .exchange()
+            .expectStatus().isEqualTo(HttpStatus.CONFLICT)
+            .expectBody()
+            .jsonPath("$.errors[0].code").isEqualTo("NOTHING_TO_ACKNOWLEDGE");
+    }
+
     //a range the service refuses is a 400
     @Test
     void should_answer_a_refused_range_with_400() {

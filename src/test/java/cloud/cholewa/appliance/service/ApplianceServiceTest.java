@@ -15,6 +15,7 @@ import cloud.cholewa.appliance.error.ApplianceException;
 import cloud.cholewa.appliance.monitor.ApplianceMonitor;
 import cloud.cholewa.appliance.monitor.ApplianceStatus;
 import cloud.cholewa.appliance.registry.Appliance;
+import cloud.cholewa.appliance.reminder.ReminderSettings;
 import cloud.cholewa.home.model.RoomName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -27,6 +28,7 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -44,7 +46,8 @@ class ApplianceServiceTest {
 
     private static final Instant T0 = Instant.parse("2026-10-24T08:00:00Z");
     private static final CycleThresholds THRESHOLDS = new CycleThresholds(10, 3, Duration.ofMinutes(10), Duration.ofMinutes(5));
-    private static final Appliance DISHWASHER = new Appliance(51, "Dishwasher", RoomName.KITCHEN, "192.0.2.51", 0, 1, THRESHOLDS);
+    private static final ReminderSettings REMINDERS = new ReminderSettings(Duration.ofMinutes(30), 4, LocalTime.of(23, 0), LocalTime.of(7, 0));
+    private static final Appliance DISHWASHER = new Appliance(51, "Dishwasher", RoomName.KITCHEN, "192.0.2.51", 0, 1, THRESHOLDS, REMINDERS);
 
     private final ApplianceMonitor monitor = mock(ApplianceMonitor.class);
     private final ApplianceRunRepository runs = mock(ApplianceRunRepository.class);

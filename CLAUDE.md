@@ -14,7 +14,7 @@ review.
 
 - Talks to: `database-service` (the device registry - the kind `appliance` and its
   `ApplianceSettings`, `internal.service.database`), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
-  RabbitMQ (publishes the household notifications); routed by `api-gateway-service` from HAS-281.
+  RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279); routed by `api-gateway-service` from HAS-281.
 - Uses libraries: `cholewa-commons` 1.12.0 (`NotificationPublisher.publishHousehold`, the pooled
   `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.13.0
   (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.2.0
@@ -77,19 +77,40 @@ review.
   (HAS-279) and the tag claim (HAS-343) take.
 - **`appliance_run`**: inserted at the start of a cycle (a restart of the pod goes on with it),
   completed at the end (`finished_at` is the fall of the draw, not the moment the end was certain),
-  deleted when discarded. **A finished cycle a new one replaced** (`Started.replacedUnacknowledged`) keeps
-  `acknowledged_at` null in its row - HAS-279 decides what an unacknowledged replaced row means for the
-  reminders. A failed write is a WARN and changes nothing in memory; a finish without
+  deleted when discarded. A failed write is a WARN and changes nothing in memory; a finish without
   the row of its start inserts the whole row. The row of a finish is matched by its id and its start at
   microsecond precision (what `timestamptz` stores); the sample times are whole seconds anyway. The energy and the highest draw count from the start
   of the pod for a cycle restored as running. `awaitingSince` of a restored finished cycle is its end
   plus `finishedAfterMinutes`.
+- **The messages of a finished cycle (HAS-279)** - `Reminders.check` judges one cycle from its row:
+  not announced yet (`notified_at` null) - `appliance finished` at once, quiet hours or not (owner,
+  2026-10-25); announced - `appliance reminder` with its number every `reminderEveryMinutes` after
+  `last_message_at`, at most `maxReminders`, never in the quiet hours (`ReminderSettings.isQuiet`:
+  `quietFrom` included, `quietTo` excluded, a span may cross midnight, equal times are no quiet hours);
+  acknowledged - nothing. It runs every minute (`MonitorSchedule.remind`, bounded 50 s) for every tracked
+  appliance in `finished`, so the finish is announced at most a minute after the end - never from the
+  sampling pass, which a slow broker (30 s per confirm) would stall past its 25 s bound. The finish carries
+  the end of the cycle as `occurredAt`, also when repeated; reminders and the acknowledgement the time they
+  go. A finished row without `notified_at` is announced however old it is (none on the cluster at V3) -
+  bound it if that ever matters. Message
+  first, row after: a message that did not get through (`HouseholdNotifier` answers false - a broker
+  failure or no confirm within 30 s, a WARN) leaves the row as it was and goes again a minute later;
+  a failed write repeats the message rather than lose it.
+- **The acknowledgement**: `POST /{id}/acknowledge` - `ApplianceMonitor.acknowledge` writes
+  `acknowledged_at` first (a failure answers 500 and leaves the cycle waiting and reminded; a row gone from
+  the database acknowledges in memory), then moves the detector to idle and forgets the row only if it is
+  still the appliance's (`clearRunId` by value - the sampling pass may have stored a new cycle meanwhile), then publishes `appliance acknowledged` with the number of reminders sent (no
+  `acknowledgePath`; notification-service decides which transports carry it). Not watched: 404; nothing
+  finished waiting: 409 `NOTHING_TO_ACKNOWLEDGE` (a second press). Once HAS-343 claims by tag, this
+  endpoint stays as the administrator's mute. **A finished cycle a new one replaced**
+  (`Started.replacedUnacknowledged`) is acknowledged in its row at the start of the new one, without a
+  message (`RunStore.closeReplaced`, before the new row is inserted).
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
   `appliance.sample-retention` (`ApplianceProperties`, 14d, 2-90 days, a bare number is days) every
   night at 03:20 (`SampleRetention`, bounded 15 min).
 - **Times**: `Instant` inside and `timestamptz` in the database; the API answers and takes the
   clock of the house without an offset (`LOCAL_DATE_TIME` of `ApplianceController`, an offset is a
-  400). `NOT_FOUND_APPLIANCE` (`ApplianceError`) is wire contract, as are the words of
+  400). `NOT_FOUND_APPLIANCE` and `NOTHING_TO_ACKNOWLEDGE` (`ApplianceError`) are wire contract, as are the words of
   `ApplianceState` - both pinned by `ApplianceErrorTest`.
 - **Layers of the API**: `ApplianceController` only takes the request; `ApplianceService` holds the logic -
   the lookup of a watched appliance (404), the rules of a range (a `400` as `ResponseStatusException`, as

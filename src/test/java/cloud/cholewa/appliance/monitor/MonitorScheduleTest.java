@@ -30,6 +30,17 @@ class MonitorScheduleTest {
     }
 
     @Test
+    void should_end_a_reminder_pass_that_never_completes_at_its_bound() {
+        when(monitor.remind()).thenReturn(Mono.never());
+
+        StepVerifier.withVirtualTime(sut::remind)
+            .expectSubscription()
+            .expectNoEvent(MonitorSchedule.REMIND_LIMIT.minusSeconds(1))
+            .thenAwait(Duration.ofSeconds(1))
+            .verifyComplete();
+    }
+
+    @Test
     void should_end_a_refresh_that_never_completes_at_its_bound() {
         when(monitor.refresh()).thenReturn(Mono.never());
 
@@ -44,6 +55,7 @@ class MonitorScheduleTest {
     void should_bound_each_pass_below_its_delay() {
         assertThat(Duration.ofSeconds(30)).isGreaterThan(MonitorSchedule.SAMPLE_LIMIT);
         assertThat(Duration.ofMinutes(5)).isGreaterThan(MonitorSchedule.REFRESH_LIMIT);
+        assertThat(Duration.ofMinutes(1)).isGreaterThan(MonitorSchedule.REMIND_LIMIT);
     }
 
     //Spring calls the method once and subscribes to the same Mono for every run

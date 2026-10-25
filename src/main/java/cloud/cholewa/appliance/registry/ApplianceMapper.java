@@ -1,6 +1,7 @@
 package cloud.cholewa.appliance.registry;
 
 import cloud.cholewa.appliance.cycle.CycleThresholds;
+import cloud.cholewa.appliance.reminder.ReminderSettings;
 import cloud.cholewa.home.model.ShellyBinding;
 import cloud.cholewa.home.model.SmartDevice;
 
@@ -42,7 +43,8 @@ final class ApplianceMapper {
             shelly.getAddress(),
             Optional.ofNullable(shelly.getChannel()).orElse(0),
             shelly.getGeneration(),
-            CycleThresholds.of(device.getAppliance())
+            CycleThresholds.of(device.getAppliance()),
+            ReminderSettings.of(device.getAppliance())
         ));
     }
 }
