@@ -42,8 +42,8 @@ class MonitorScheduleTest {
 
     @Test
     void should_bound_each_pass_below_its_delay() {
-        assertThat(MonitorSchedule.SAMPLE_LIMIT.compareTo(Duration.ofSeconds(30))).isNegative();
-        assertThat(MonitorSchedule.REFRESH_LIMIT.compareTo(Duration.ofMinutes(5))).isNegative();
+        assertThat(Duration.ofSeconds(30)).isGreaterThan(MonitorSchedule.SAMPLE_LIMIT);
+        assertThat(Duration.ofMinutes(5)).isGreaterThan(MonitorSchedule.REFRESH_LIMIT);
     }
 
     //Spring calls the method once and subscribes to the same Mono for every run
