@@ -1,5 +1,7 @@
 package cloud.cholewa.appliance.config;
 
+import cloud.cholewa.appliance.error.ApplianceException;
+import cloud.cholewa.appliance.error.processor.ApplianceExceptionProcessor;
 import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
 import org.springframework.boot.autoconfigure.web.WebProperties;
 import org.springframework.boot.webflux.error.ErrorAttributes;
@@ -9,8 +11,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.codec.ServerCodecConfigurer;
 
-//The error contract of the organization (cholewa-commons); the domain exceptions and their codes come
-//with the endpoints (HAS-279)
+import java.util.Map;
+
+//The error contract of the organization (cholewa-commons), with the processor of the requests the API refuses
 @Configuration
 public class ExceptionHandlerConfig {
 
@@ -24,6 +27,6 @@ public class ExceptionHandlerConfig {
     ) {
         return new GlobalErrorExceptionHandler(
             errorAttributes, webProperties.getResources(), applicationContext, serverCodecConfigurer
-        );
+        ).withCustomErrorProcessor(Map.of(ApplianceException.class, new ApplianceExceptionProcessor()));
     }
 }
