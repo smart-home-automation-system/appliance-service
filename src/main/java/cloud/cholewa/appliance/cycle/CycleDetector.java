@@ -11,7 +11,9 @@ import java.util.Optional;
 //IDLE -> RUNNING   the draw stays above runningAboveWatts for START_AFTER (a minute); the cycle starts
 //                  at the first sample above
 //RUNNING -> FINISHING   a sample below idleBelowWatts
-//FINISHING -> RUNNING   a sample at or above idleBelowWatts - a pause of a washing machine
+//FINISHING -> RUNNING   the draw stays at or above idleBelowWatts for START_AFTER (a minute) - a washing
+//                       machine going on after a pause; a shorter draw (the anti-crease turns of a dryer
+//                       that waits to be emptied, HAS-285) is ignored and the end still counts from the fall
 //FINISHING -> FINISHED  finishedAfterMinutes below idleBelowWatts, when the cycle lasted at least
 //                       minRunMinutes (start to the fall); a shorter one is discarded, back to IDLE
 //FINISHED -> IDLE       acknowledged or claimed (HAS-279, HAS-343)
@@ -24,8 +26,9 @@ public final class CycleDetector {
     public static final Duration START_AFTER = Duration.ofMinutes(1);
 
     private ApplianceState state;
-    //the start of the cycle (RUNNING, FINISHING, FINISHED) or of the draw above the threshold (IDLE)
+    //the start of the cycle (RUNNING, FINISHING, FINISHED)
     private Instant startedAt;
+    //the first sample of a draw that may start a cycle (IDLE, FINISHED) or end a pause (FINISHING)
     private Instant aboveSince;
     //the first sample below idleBelowWatts (FINISHING), the end of the cycle (FINISHED)
     private Instant finishedAt;
@@ -113,17 +116,25 @@ public final class CycleDetector {
         if (watts < thresholds.idleBelowWatts()) {
             state = ApplianceState.FINISHING;
             finishedAt = at;
+            aboveSince = null;
         }
         return Optional.empty();
     }
 
     private Optional<Transition> whileFinishing(final Instant at, final double watts, final CycleThresholds thresholds) {
         if (watts >= thresholds.idleBelowWatts()) {
-            state = ApplianceState.RUNNING;
-            finishedAt = null;
             maxWatts = Math.max(maxWatts, (int) Math.round(watts));
+            if (aboveSince == null) {
+                aboveSince = at;
+            }
+            if (Duration.between(aboveSince, at).compareTo(START_AFTER) >= 0) {
+                state = ApplianceState.RUNNING;
+                finishedAt = null;
+                aboveSince = null;
+            }
             return Optional.empty();
         }
+        aboveSince = null;
         if (Duration.between(finishedAt, at).compareTo(thresholds.finishedAfter()) < 0) {
             return Optional.empty();
         }

@@ -19,9 +19,9 @@ review.
   `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.13.0
   (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.2.0
   (`ShellyGen1Client.meter` - the plugs are Gen1; added to the library for this service in HAS-278).
-- Database: own database `home-automation-appliance`, pool 2 - with it 18 of the 22 backend
-  connections are allotted; a rollout of one service reaches 21. **The last service with a
-  database before the shares are re-cut** (HAS-277).
+- Database: own database `home-automation-appliance`, pool 2 - with it this project holds 18 of the
+  47 connections of the managed PostgreSQL (22 until the plan change of 2026-10-25; the split is in
+  `organization.md`).
 - Integrates with hardware: Shelly plugs (Gen1, polled - no `/device` consumer: Gen1 does not
   report over MQTT).
 
@@ -72,7 +72,15 @@ review.
   start rule is the owner's of 2026-10-24: a minute above `runningAboveWatts` starts the cycle at
   its first sample, `minRunMinutes` is the least length of the whole cycle checked at its end - the
   description of `ApplianceSettings` in smart-home-sdk 1.13.0 says otherwise, to be corrected with
-  its next release. An invalid sample or an unanswered poll never reaches the detector: time passes
+  its next release. **A pause ends only after a minute of draw** (HAS-285, 2026-10-26): the dryer of
+  the house turns its drum for a few seconds about every minute while it waits to be emptied (75-210 W,
+  one sample between samples of 2 W), and one sample at or above `idleBelowWatts` used to send the cycle
+  back to `running` - it was never announced while the drum kept turning. Now `finishing` goes back to
+  `running` only when the draw stays at or above `idleBelowWatts` for `START_AFTER`, and the end counts
+  from the fall; the pauses of the washing machine (one or two samples, then 27 W for minutes) still
+  carry the cycle on. A turn of a minute or longer above `runningAboveWatts` after the end would still
+  start a new cycle (discarded as too short) - raise the dryer's `runningAboveWatts` (it dries at about
+  480 W) if that is ever seen. An invalid sample or an unanswered poll never reaches the detector: time passes
   only with valid samples. `Transition.Acknowledged` is the one transition both the acknowledgement
   (HAS-279) and the tag claim (HAS-343) take.
 - **`appliance_run`**: inserted at the start of a cycle (a restart of the pod goes on with it),

@@ -45,7 +45,7 @@ appliance:
 |---|---|---|
 | `idle` | `running` | the draw stays above `runningAboveWatts` for a minute - the cycle starts at the first sample above |
 | `running` | `finishing` | a sample below `idleBelowWatts` |
-| `finishing` | `running` | a sample at or above `idleBelowWatts` - a pause of a washing machine |
+| `finishing` | `running` | the draw stays at or above `idleBelowWatts` for a minute - a washing machine going on after a pause; a shorter draw (the drum of a dryer turning now and then while it waits to be emptied, HAS-285) is ignored and the end still counts from the fall |
 | `finishing` | `finished` | `finishedAfterMinutes` below `idleBelowWatts`, when the cycle lasted at least `minRunMinutes`; a shorter one is discarded, back to `idle`, nobody is told |
 | `finished` | `idle` | acknowledged (HAS-279) or claimed by a tag (HAS-343) |
 | `finished` | `running` | a new cycle starts |
