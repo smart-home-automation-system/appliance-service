@@ -1,5 +1,6 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.availability.PlugAvailability;
 import cloud.cholewa.appliance.cycle.ApplianceState;
 import cloud.cholewa.appliance.cycle.CycleView;
 import cloud.cholewa.appliance.cycle.RunStore;
@@ -138,6 +139,15 @@ public class ApplianceMonitor {
                 appliance.clearRunId(storedRunId);
                 return householdNotifier.acknowledged(appliance.appliance(), now, 0, member);
             });
+    }
+
+    //the plugs as the availability monitor sees them (HAS-280): since when each gives no reading, and whether it
+    //was polled at all since the start
+    public List<PlugAvailability.Watched> plugs() {
+        return tracked.values().stream()
+            .map(appliance -> new PlugAvailability.Watched(appliance.appliance().id(), appliance.appliance().name(),
+                appliance.appliance().room().getValue(), appliance.failingSince(), appliance.lastPoll() != null))
+            .toList();
     }
 
     public List<ApplianceStatus> statuses() {

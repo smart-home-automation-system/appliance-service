@@ -61,6 +61,11 @@ cholewa:
 # every night at 03:20
 appliance:
   sample-retention: 14d
+  # the availability monitor of the plugs (HAS-280): out after five minutes without a reading, named again every
+  # hour while out; on the technical channel (alert / info), never the household's
+  monitor:
+    offline-after: PT5M
+    reminder-every: PT1H
 
 internal:
   service:
