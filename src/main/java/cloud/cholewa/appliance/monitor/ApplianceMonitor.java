@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -81,8 +82,9 @@ public class ApplianceMonitor {
 
     //the finished cycle of an appliance acknowledged: the row first, so that a failed write leaves the cycle
     //waiting (and reminded), then the detector, then the message - which never fails the acknowledgement.
-    //Not watched: 404; nothing finished waiting: 409
-    public Mono<Void> acknowledge(final long id) {
+    //Not watched: 404; nothing finished waiting: 409. The member (HAS-347) is a name of the registry already
+    //checked by ApplianceService, or null when nobody was named
+    public Mono<Void> acknowledge(final long id, final String member) {
         return Mono.defer(() -> {
             final TrackedAppliance appliance = tracked.get(id);
             if (appliance == null) {
@@ -94,7 +96,7 @@ public class ApplianceMonitor {
             }
             final Instant now = Instant.now(clock);
             //a row gone from the database leaves nothing to remind either: the cycle is acknowledged in memory
-            return runStore.acknowledge(runId, now)
+            return runStore.acknowledge(runId, now, member)
                 .map(ApplianceRunEntity::remindersSent)
                 .defaultIfEmpty(0)
                 .flatMap(remindersSent -> {
@@ -102,9 +104,10 @@ public class ApplianceMonitor {
                     if (appliance.detector().acknowledge().isEmpty()) {
                         return Mono.empty();
                     }
-                    log.info("{} ({}): acknowledged", appliance.appliance().name(), id);
+                    log.info("{} ({}): acknowledged by {}", appliance.appliance().name(), id,
+                        Objects.requireNonNullElse(member, "nobody named"));
                     appliance.clearRunId(runId);
-                    return householdNotifier.acknowledged(appliance.appliance(), now, remindersSent);
+                    return householdNotifier.acknowledged(appliance.appliance(), now, remindersSent, member);
                 })
                 .then();
         });

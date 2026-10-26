@@ -37,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -223,15 +224,15 @@ class ApplianceMonitorTest {
     void should_acknowledge_a_finished_cycle_once() {
         watch(DRYER_PLUG, finished(), 5L);
         final Instant now = T0.plus(Duration.ofHours(3));
-        when(runStore.acknowledge(5L, now)).thenReturn(Mono.just(ApplianceRunEntity.builder().id(5L).deviceId(31)
+        when(runStore.acknowledge(5L, now, "Anna")).thenReturn(Mono.just(ApplianceRunEntity.builder().id(5L).deviceId(31)
             .startedAt(T0).remindersSent(2).acknowledgedAt(now).build()));
-        when(notifier.acknowledged(DRYER_PLUG, now, 2)).thenReturn(Mono.just(true));
+        when(notifier.acknowledged(DRYER_PLUG, now, 2, "Anna")).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31).as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
 
-        verify(notifier).acknowledged(DRYER_PLUG, now, 2);
+        verify(notifier).acknowledged(DRYER_PLUG, now, 2, "Anna");
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
-        sut.acknowledge(31).as(StepVerifier::create)
+        sut.acknowledge(31, null).as(StepVerifier::create)
             .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
             .verify();
     }
@@ -240,38 +241,38 @@ class ApplianceMonitorTest {
     void should_refuse_to_acknowledge_what_does_not_wait() {
         watch(DRYER_PLUG, CycleDetector.running(T0), 5L);
 
-        sut.acknowledge(31).as(StepVerifier::create)
+        sut.acknowledge(31, null).as(StepVerifier::create)
             .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
             .verify();
-        sut.acknowledge(99).as(StepVerifier::create)
+        sut.acknowledge(99, null).as(StepVerifier::create)
             .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOT_FOUND_APPLIANCE))
             .verify();
-        verify(runStore, never()).acknowledge(anyLong(), any());
+        verify(runStore, never()).acknowledge(anyLong(), any(), any());
     }
 
     //a row gone from the database: nothing remains to remind, the cycle is acknowledged in memory
     @Test
     void should_acknowledge_a_cycle_whose_row_is_gone() {
         watch(DRYER_PLUG, finished(), 5L);
-        when(runStore.acknowledge(eq(5L), any())).thenReturn(Mono.empty());
-        when(notifier.acknowledged(eq(DRYER_PLUG), any(), eq(0))).thenReturn(Mono.just(true));
+        when(runStore.acknowledge(eq(5L), any(), isNull())).thenReturn(Mono.empty());
+        when(notifier.acknowledged(eq(DRYER_PLUG), any(), eq(0), isNull())).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31).as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, null).as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
-        verify(notifier).acknowledged(eq(DRYER_PLUG), any(), eq(0));
+        verify(notifier).acknowledged(eq(DRYER_PLUG), any(), eq(0), isNull());
     }
 
     //the row first: a failed write leaves the cycle waiting and reminded, and nobody is told it was acknowledged
     @Test
     void should_keep_the_cycle_waiting_when_the_acknowledgement_cannot_be_stored() {
         watch(DRYER_PLUG, finished(), 5L);
-        when(runStore.acknowledge(eq(5L), any())).thenReturn(Mono.error(new IllegalStateException("database away")));
+        when(runStore.acknowledge(eq(5L), any(), isNull())).thenReturn(Mono.error(new IllegalStateException("database away")));
 
-        sut.acknowledge(31).as(StepVerifier::create).verifyError(IllegalStateException.class);
+        sut.acknowledge(31, null).as(StepVerifier::create).verifyError(IllegalStateException.class);
 
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHED);
-        verify(notifier, never()).acknowledged(any(), any(), anyInt());
+        verify(notifier, never()).acknowledged(any(), any(), anyInt(), any());
     }
 
     private static CycleDetector finished() {

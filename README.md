@@ -32,7 +32,7 @@ plugs they run on (epic HAS-270). From the draw it tells when a cycle runs and w
 finished, tells the household that the appliance needs attention, reminds it until somebody
 acknowledges it in the application, and keeps the history of the cycles. The household is told
 through the `household` category of `notification-service` - a JSON `HouseholdNotification`
-(`smart-home-sdk` 1.13.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
+(`smart-home-sdk` 1.14.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
 `notification-service` words it in Polish for the household's Discord channel, SMS and Web Push.
 
 **Since HAS-278 it reads the plugs and detects the cycles.** The appliances are devices of the
@@ -58,7 +58,7 @@ the appliance from the registry as its subject, `acknowledgePath` `/room`); `not
 words it in Polish for Discord, SMS and Web Push. Then a reminder every `reminderEveryMinutes` after
 the last message, at most `maxReminders`, never between `quietFrom` and `quietTo` (a reminder due
 then waits for their end), until the cycle is acknowledged - `POST /home/appliance/{id}/acknowledge`,
-which publishes `appliance acknowledged`. A new cycle on an unacknowledged appliance closes the old
+which publishes `appliance acknowledged` - with the `member` who acknowledged it, when the application named one (HAS-347). A new cycle on an unacknowledged appliance closes the old
 one as acknowledged, without a message. What was sent is in the row of the cycle, so a restart sends
 nothing twice, and a message that did not get through is sent again a minute later. What comes next:
 
@@ -98,9 +98,9 @@ times are the clock of the house without an offset; a field not known is left ou
 |---|---|---|
 | `GET` | `/home/appliance` | every watched appliance: `id`, `name`, `room`, `state` (`idle`, `running`, `finishing`, `finished`), `watts` and `sampledAt` (the last valid reading), `runningSince`, `finishedAt` (the fall of the draw), `awaitingSince` (the moment the end was certain), `reachable` (the last poll answered) |
 | `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
-| `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt` |
+| `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt`, `acknowledgedBy` (who acknowledged it in the application, HAS-347) |
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
-| `POST` | `/home/appliance/{id}/acknowledge` | `204` - the finished cycle acknowledged, its reminders stop (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished cycle waits, `404 NOT_FOUND_APPLIANCE` |
+| `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished cycle waits, `404 NOT_FOUND_APPLIANCE` |
 
 `from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
 longer range is a `400`. The history is answered for a watched appliance only: one
@@ -114,7 +114,7 @@ with `permission denied for schema public`.
 
 - `appliance_run` (V1) - one row per cycle, inserted when it starts and completed when it has
   finished; a run below `minRunMinutes` is deleted. V3 adds its messages: `notified_at` (the finish
-  announced), `last_message_at`, with `reminders_sent` and `acknowledged_at` of V1.
+  announced), `last_message_at`, with `reminders_sent` and `acknowledged_at` of V1; V4 adds `acknowledged_by` (HAS-347).
 - `appliance_sample` (V2) - every valid sample, kept `appliance.sample-retention` (14 days, a bare
   number is days, 2-90) and deleted every night at 03:20.
 

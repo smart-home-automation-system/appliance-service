@@ -59,10 +59,22 @@ class HouseholdNotifierTest {
     void should_publish_the_acknowledgement_without_a_path() {
         when(publisher.publishHousehold(anyString())).thenReturn(Mono.empty());
 
-        sut.acknowledged(DISHWASHER, AT, 3).as(StepVerifier::create).expectNext(true).verifyComplete();
+        sut.acknowledged(DISHWASHER, AT, 3, null).as(StepVerifier::create).expectNext(true).verifyComplete();
 
         assertThat(published()).contains("\"event\":\"appliance acknowledged\"", "\"reminder\":3")
-            .doesNotContain("acknowledgePath");
+            .doesNotContain("acknowledgePath", "member");
+    }
+
+    //HAS-347: who acknowledged it, for notification-service to name
+    @Test
+    void should_publish_the_member_who_acknowledged_it() {
+        when(publisher.publishHousehold(anyString())).thenReturn(Mono.empty());
+
+        sut.acknowledged(DISHWASHER, AT, 1, "Anna").as(StepVerifier::create).expectNext(true).verifyComplete();
+
+        assertThat(published()).isEqualTo("""
+            {"event":"appliance acknowledged","subject":"Dishwasher","deviceId":133,\
+            "occurredAt":"2026-10-24T12:00:00","reminder":1,"member":"Anna"}""");
     }
 
     @Test

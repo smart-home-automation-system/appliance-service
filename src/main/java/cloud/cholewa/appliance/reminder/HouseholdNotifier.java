@@ -34,20 +34,22 @@ public class HouseholdNotifier {
     private final Clock clock;
 
     public Mono<Boolean> finished(final Appliance appliance, final Instant at) {
-        return publish(appliance, HouseholdEvent.APPLIANCE_FINISHED, at, 0, ACKNOWLEDGE_PATH);
+        return publish(appliance, HouseholdEvent.APPLIANCE_FINISHED, at, 0, ACKNOWLEDGE_PATH, null);
     }
 
     public Mono<Boolean> reminder(final Appliance appliance, final Instant at, final int count) {
-        return publish(appliance, HouseholdEvent.APPLIANCE_REMINDER, at, count, ACKNOWLEDGE_PATH);
+        return publish(appliance, HouseholdEvent.APPLIANCE_REMINDER, at, count, ACKNOWLEDGE_PATH, null);
     }
 
-    //nothing left to acknowledge, so no path; the number of reminders that had been sent
-    public Mono<Boolean> acknowledged(final Appliance appliance, final Instant at, final int remindersSent) {
-        return publish(appliance, HouseholdEvent.APPLIANCE_ACKNOWLEDGED, at, remindersSent, null);
+    //nothing left to acknowledge, so no path; the number of reminders that had been sent and who acknowledged
+    //it (HAS-347, left out when nobody was named)
+    public Mono<Boolean> acknowledged(final Appliance appliance, final Instant at, final int remindersSent,
+                                      final String member) {
+        return publish(appliance, HouseholdEvent.APPLIANCE_ACKNOWLEDGED, at, remindersSent, null, member);
     }
 
     private Mono<Boolean> publish(final Appliance appliance, final HouseholdEvent event, final Instant at,
-                                  final int reminder, final String acknowledgePath) {
+                                  final int reminder, final String acknowledgePath, final String member) {
         return Mono.fromCallable(() -> jsonMapper.writeValueAsString(HouseholdNotification.builder()
                 .event(event)
                 .subject(appliance.name())
@@ -55,6 +57,7 @@ public class HouseholdNotifier {
                 .occurredAt(LocalDateTime.ofInstant(at, clock.getZone()))
                 .reminder(reminder)
                 .acknowledgePath(acknowledgePath)
+                .member(member)
                 .build()))
             .flatMap(notificationPublisher::publishHousehold)
             .timeout(LIMIT)

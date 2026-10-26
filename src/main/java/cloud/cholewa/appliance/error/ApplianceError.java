@@ -16,7 +16,10 @@ public enum ApplianceError implements ErrorId {
     NOT_FOUND_APPLIANCE("Appliance not found"),
 
     //the appliance has no finished cycle waiting to be acknowledged (HAS-279)
-    NOTHING_TO_ACKNOWLEDGE("Nothing to acknowledge");
+    NOTHING_TO_ACKNOWLEDGE("Nothing to acknowledge"),
+
+    //the member who acknowledges is no switched-on member of the household registry (HAS-347)
+    UNKNOWN_MEMBER("Unknown household member");
 
     private final String description;
 }

@@ -96,6 +96,18 @@ class ApplianceRepositoriesTest {
             .verifyComplete();
     }
 
+    //V4 (HAS-347): who acknowledged it
+    @Test
+    void should_store_who_acknowledged_a_cycle() {
+        final ApplianceRunEntity run = runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0).build()).block();
+
+        runs.save(run.toBuilder().acknowledgedAt(T0.plusSeconds(600)).acknowledgedBy("Anna").build()).block();
+
+        runs.findById(run.id()).as(StepVerifier::create)
+            .assertNext(read -> assertThat(read.acknowledgedBy()).isEqualTo("Anna"))
+            .verifyComplete();
+    }
+
     @Test
     void should_find_the_latest_run_of_an_appliance() {
         runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0).build()).block();

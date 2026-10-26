@@ -93,8 +93,8 @@ class ApplianceControllerTest {
     @Test
     void should_hand_the_range_of_the_runs_to_the_service() {
         when(applianceService.runs(51, LocalDateTime.of(2026, 10, 1, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)))
-            .thenReturn(Flux.just(new RunReply(3, AT, AT.plusHours(2), 812L, 2140, null),
-                new RunReply(4, AT.plusHours(10), null, null, null, null)));
+            .thenReturn(Flux.just(new RunReply(3, AT, AT.plusHours(2), 812L, 2140, AT.plusHours(3), "Anna"),
+                new RunReply(4, AT.plusHours(10), null, null, null, null, null)));
 
         webTestClient.get().uri("/51/runs?from=2026-10-01T00:00:00&to=2026-10-25T00:00:00")
             .exchange()
@@ -102,7 +102,7 @@ class ApplianceControllerTest {
             .expectBody().json("""
                 [
                   {"id": 3, "startedAt": "2026-10-24T10:00:00", "finishedAt": "2026-10-24T12:00:00",
-                   "energyWh": 812, "maxWatts": 2140},
+                   "energyWh": 812, "maxWatts": 2140, "acknowledgedAt": "2026-10-24T13:00:00", "acknowledgedBy": "Anna"},
                   {"id": 4, "startedAt": "2026-10-24T20:00:00"}
                 ]""", JsonCompareMode.STRICT);
     }
@@ -122,7 +122,7 @@ class ApplianceControllerTest {
 
     @Test
     void should_acknowledge_with_204() {
-        when(applianceService.acknowledge(133)).thenReturn(Mono.empty());
+        when(applianceService.acknowledge(133, null)).thenReturn(Mono.empty());
 
         webTestClient.post().uri("/133/acknowledge")
             .exchange()
@@ -130,9 +130,39 @@ class ApplianceControllerTest {
             .expectBody().isEmpty();
     }
 
+    //HAS-347: who acknowledges it, handed to the service as sent
+    @Test
+    void should_hand_the_member_who_acknowledges_to_the_service() {
+        when(applianceService.acknowledge(133, "anna")).thenReturn(Mono.empty());
+
+        webTestClient.post().uri("/133/acknowledge?member=anna")
+            .exchange()
+            .expectStatus().isNoContent();
+        verify(applianceService).acknowledge(133, "anna");
+    }
+
+    @Test
+    void should_refuse_a_member_name_out_of_the_bounds_of_the_registry() {
+        webTestClient.post().uri("/133/acknowledge?member=ab")
+            .exchange()
+            .expectStatus().isBadRequest();
+        verifyNoInteractions(applianceService);
+    }
+
+    @Test
+    void should_answer_400_with_its_code_for_an_unknown_member() {
+        when(applianceService.acknowledge(133, "Nobody")).thenReturn(Mono.error(ApplianceException.unknownMember("Nobody")));
+
+        webTestClient.post().uri("/133/acknowledge?member=Nobody")
+            .exchange()
+            .expectStatus().isBadRequest()
+            .expectBody()
+            .jsonPath("$.errors[0].code").isEqualTo("UNKNOWN_MEMBER");
+    }
+
     @Test
     void should_answer_409_when_nothing_waits_to_be_acknowledged() {
-        when(applianceService.acknowledge(133)).thenReturn(Mono.error(ApplianceException.nothingToAcknowledge(133)));
+        when(applianceService.acknowledge(133, null)).thenReturn(Mono.error(ApplianceException.nothingToAcknowledge(133)));
 
         webTestClient.post().uri("/133/acknowledge")
             .exchange()

@@ -4,6 +4,7 @@ import cloud.cholewa.appliance.api.model.ApplianceReply;
 import cloud.cholewa.appliance.api.model.RunReply;
 import cloud.cholewa.appliance.api.model.SampleReply;
 import cloud.cholewa.appliance.service.ApplianceService;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -43,11 +44,15 @@ public class ApplianceController {
         return applianceService.appliance(id);
     }
 
-    //204 - the reminders stop; 409 NOTHING_TO_ACKNOWLEDGE when no finished cycle waits
+    //204 - the reminders stop; 409 NOTHING_TO_ACKNOWLEDGE when no finished cycle waits. member (HAS-347,
+    //optional): who acknowledges it, a name of the household registry - 400 UNKNOWN_MEMBER otherwise
     @PostMapping("{id}/acknowledge")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    Mono<Void> acknowledge(@PathVariable final long id) {
-        return applianceService.acknowledge(id);
+    Mono<Void> acknowledge(
+        @PathVariable final long id,
+        @RequestParam(required = false) @Size(min = 3, max = 50) final String member
+    ) {
+        return applianceService.acknowledge(id, member);
     }
 
     @GetMapping("{id}/runs")

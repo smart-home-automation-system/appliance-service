@@ -15,7 +15,11 @@ import cloud.cholewa.appliance.error.ApplianceException;
 import cloud.cholewa.appliance.monitor.ApplianceMonitor;
 import cloud.cholewa.appliance.monitor.ApplianceStatus;
 import cloud.cholewa.appliance.registry.Appliance;
+import cloud.cholewa.appliance.registry.HouseholdProfilesClient;
+import cloud.cholewa.appliance.registry.RegistryCallException;
 import cloud.cholewa.appliance.reminder.ReminderSettings;
+import cloud.cholewa.home.model.HouseholdProfile;
+import cloud.cholewa.home.model.MemberRole;
 import cloud.cholewa.home.model.RoomName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -23,6 +27,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
@@ -36,8 +41,11 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -52,7 +60,8 @@ class ApplianceServiceTest {
     private final ApplianceMonitor monitor = mock(ApplianceMonitor.class);
     private final ApplianceRunRepository runs = mock(ApplianceRunRepository.class);
     private final ApplianceSampleRepository samples = mock(ApplianceSampleRepository.class);
-    private final ApplianceService sut = new ApplianceService(monitor, runs, samples, Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
+    private final HouseholdProfilesClient profiles = mock(HouseholdProfilesClient.class);
+    private final ApplianceService sut = new ApplianceService(monitor, runs, samples, profiles, Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
 
     @Test
     void should_answer_an_appliance_by_the_clock_of_the_house() {
@@ -100,7 +109,7 @@ class ApplianceServiceTest {
 
         sut.runs(51, LocalDateTime.of(2026, 10, 1, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)).as(StepVerifier::create)
             .expectNext(new RunReply(3, LocalDateTime.of(2026, 10, 24, 10, 0), LocalDateTime.of(2026, 10, 24, 12, 0),
-                812L, 2140, null))
+                812L, 2140, null, null))
             .verifyComplete();
     }
 
@@ -128,6 +137,53 @@ class ApplianceServiceTest {
             .verifyComplete();
     }
 
+    //HAS-347: the member is checked against the profiles whatever the case, and goes on by the name of the registry
+    @Test
+    void should_acknowledge_by_the_name_the_registry_has() {
+        when(profiles.getProfiles()).thenReturn(Mono.just(List.of(profile("Anna"), profile("Jan"))));
+        when(monitor.acknowledge(51, "Anna")).thenReturn(Mono.empty());
+
+        sut.acknowledge(51, " anna ").as(StepVerifier::create).verifyComplete();
+
+        verify(monitor).acknowledge(51, "Anna");
+    }
+
+    //a name the registry does not have: 400, and nothing is acknowledged
+    @Test
+    void should_refuse_an_unknown_member_and_acknowledge_nothing() {
+        when(profiles.getProfiles()).thenReturn(Mono.just(List.of(profile("Anna"))));
+
+        sut.acknowledge(51, "Nobody").as(StepVerifier::create)
+            .expectErrorSatisfies(e -> assertThat(e).isInstanceOfSatisfying(ApplianceException.class, refused -> {
+                assertThat(refused.getError()).isEqualTo(ApplianceError.UNKNOWN_MEMBER);
+                assertThat(refused.getHttpStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
+            }))
+            .verify();
+        verify(monitor, never()).acknowledge(anyLong(), any());
+    }
+
+    //a failed read of the profiles never holds the acknowledgement back: it goes without a name
+    @Test
+    void should_acknowledge_without_a_name_when_the_profiles_cannot_be_read() {
+        when(profiles.getProfiles()).thenReturn(Mono.error(new RegistryCallException("database-service answered 503")));
+        when(monitor.acknowledge(51, null)).thenReturn(Mono.empty());
+
+        sut.acknowledge(51, "Anna").as(StepVerifier::create).verifyComplete();
+
+        verify(monitor).acknowledge(51, null);
+    }
+
+    //nobody named (Bruno): no read of the profiles
+    @Test
+    void should_acknowledge_without_reading_the_profiles_when_nobody_is_named() {
+        when(monitor.acknowledge(51, null)).thenReturn(Mono.empty());
+
+        sut.acknowledge(51, null).as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(51, "    ").as(StepVerifier::create).verifyComplete();
+
+        verifyNoInteractions(profiles);
+    }
+
     @ParameterizedTest
     @CsvSource({
         "runs, 2026-10-02T00:00:00, 2026-10-01T00:00:00, to must be after from",
@@ -148,6 +204,10 @@ class ApplianceServiceTest {
             }))
             .verify();
         verifyNoInteractions(runs, samples);
+    }
+
+    private static HouseholdProfile profile(final String name) {
+        return HouseholdProfile.builder().name(name).role(MemberRole.RESIDENT).build();
     }
 
     private static ApplianceStatus idle() {
