@@ -73,12 +73,17 @@ public class RunStore {
         return update(runId, run -> run.toBuilder().remindersSent(count).lastMessageAt(at).build());
     }
 
-    //acknowledged - the reminders stop; a row acknowledged already keeps its first time
+    //acknowledged - the reminders stop; a row acknowledged already keeps its first time and its member
     public Mono<ApplianceRunEntity> acknowledge(final long runId, final Instant at) {
+        return acknowledge(runId, at, null);
+    }
+
+    //the same by a member of the household (HAS-347), or by nobody named (null)
+    public Mono<ApplianceRunEntity> acknowledge(final long runId, final Instant at, final String member) {
         return applianceRunRepository.findById(runId)
             .flatMap(run -> run.acknowledgedAt() != null
                 ? Mono.just(run)
-                : applianceRunRepository.save(run.toBuilder().acknowledgedAt(at).build()));
+                : applianceRunRepository.save(run.toBuilder().acknowledgedAt(at).acknowledgedBy(member).build()));
     }
 
     public Mono<ApplianceRunEntity> find(final long runId) {

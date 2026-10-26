@@ -182,6 +182,19 @@ class RunStoreTest {
         verify(repository, never()).save(any());
     }
 
+    //HAS-347: who acknowledged it, stored with the time; the first acknowledgement keeps its member
+    @Test
+    void should_store_who_acknowledged_it() {
+        when(repository.findById(5L)).thenReturn(Mono.just(run(END, null)));
+
+        sut.acknowledge(5L, END.plusSeconds(600), "Anna").as(StepVerifier::create).expectNextCount(1).verifyComplete();
+
+        final ArgumentCaptor<ApplianceRunEntity> saved = ArgumentCaptor.forClass(ApplianceRunEntity.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue().acknowledgedAt()).isEqualTo(END.plusSeconds(600));
+        assertThat(saved.getValue().acknowledgedBy()).isEqualTo("Anna");
+    }
+
     private static ApplianceRunEntity run(final Instant finishedAt, final Instant acknowledgedAt) {
         return ApplianceRunEntity.builder().id(5L).deviceId(7).startedAt(T0).finishedAt(finishedAt)
             .acknowledgedAt(acknowledgedAt).build();

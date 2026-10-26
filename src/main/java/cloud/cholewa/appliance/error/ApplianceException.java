@@ -26,4 +26,9 @@ public class ApplianceException extends RuntimeException {
         return new ApplianceException(HttpStatus.CONFLICT, ApplianceError.NOTHING_TO_ACKNOWLEDGE,
             "Appliance " + id + " has no finished cycle waiting to be acknowledged");
     }
+
+    public static ApplianceException unknownMember(final String member) {
+        return new ApplianceException(HttpStatus.BAD_REQUEST, ApplianceError.UNKNOWN_MEMBER,
+            "No switched-on household member is named " + member);
+    }
 }

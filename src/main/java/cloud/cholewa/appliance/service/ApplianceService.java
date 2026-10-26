@@ -9,7 +9,10 @@ import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
 import cloud.cholewa.appliance.error.ApplianceException;
 import cloud.cholewa.appliance.monitor.ApplianceMonitor;
 import cloud.cholewa.appliance.monitor.ApplianceStatus;
+import cloud.cholewa.appliance.registry.HouseholdProfilesClient;
+import cloud.cholewa.home.model.HouseholdProfile;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -22,11 +25,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 //What the read API answers (HAS-278): the appliances as the monitor holds them, their cycles and samples from
 //the database. The rules of a range, the lookup of the appliance (404 NOT_FOUND_APPLIANCE) and the clock of
 //the house are here; the controller only takes the request. A range that breaks a rule is a 400 without a
 //code, as the other histories answer it (ResponseStatusException, as WeatherHistoryService)
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ApplianceService {
@@ -37,6 +42,7 @@ public class ApplianceService {
     private final ApplianceMonitor applianceMonitor;
     private final ApplianceRunRepository applianceRunRepository;
     private final ApplianceSampleRepository applianceSampleRepository;
+    private final HouseholdProfilesClient householdProfilesClient;
     private final Clock clock;
 
     public Mono<List<ApplianceReply>> appliances() {
@@ -48,9 +54,31 @@ public class ApplianceService {
     }
 
     //the finished cycle acknowledged (HAS-279) - a mute meant for the administrator once the tag claims of
-    //HAS-343 acknowledge for the members: 404 not watched, 409 NOTHING_TO_ACKNOWLEDGE when nothing waits
-    public Mono<Void> acknowledge(final long id) {
-        return applianceMonitor.acknowledge(id);
+    //HAS-343 acknowledge for the members: 404 not watched, 409 NOTHING_TO_ACKNOWLEDGE when nothing waits.
+    //The member who acknowledges it (HAS-347, optional) is checked first against the profiles of the household,
+    //whatever the case, and stored and told by the name the registry has: 400 UNKNOWN_MEMBER, and nothing is
+    //acknowledged. A failed read of the profiles never holds the acknowledgement back - it goes without a name
+    public Mono<Void> acknowledge(final long id, final String member) {
+        return Mono.justOrEmpty(member)
+            .map(String::strip)
+            .filter(name -> !name.isEmpty())
+            .flatMap(this::registeredName)
+            .map(Optional::of)
+            .defaultIfEmpty(Optional.empty())
+            .flatMap(name -> applianceMonitor.acknowledge(id, name.orElse(null)));
+    }
+
+    private Mono<String> registeredName(final String member) {
+        return householdProfilesClient.getProfiles()
+            .flatMap(profiles -> Mono.justOrEmpty(profiles.stream()
+                    .map(HouseholdProfile::getName)
+                    .filter(member::equalsIgnoreCase)
+                    .findFirst())
+                .switchIfEmpty(Mono.error(() -> ApplianceException.unknownMember(member))))
+            .onErrorResume(e -> !(e instanceof ApplianceException), e -> {
+                log.warn("The member who acknowledges could not be checked, acknowledged without a name: {}", e.toString());
+                return Mono.empty();
+            });
     }
 
     //the cycles that started in [from, to), at most 31 days
@@ -109,7 +137,7 @@ public class ApplianceService {
 
     private RunReply reply(final ApplianceRunEntity run) {
         return new RunReply(run.id(), local(run.startedAt()), local(run.finishedAt()), run.energyWh(), run.maxWatts(),
-            local(run.acknowledgedAt()));
+            local(run.acknowledgedAt()), run.acknowledgedBy());
     }
 
     private LocalDateTime local(final Instant instant) {

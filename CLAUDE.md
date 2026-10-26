@@ -13,10 +13,10 @@ review.
 ## Role in the system
 
 - Talks to: `database-service` (the device registry - the kind `appliance` and its
-  `ApplianceSettings`, `internal.service.database`), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
+  `ApplianceSettings`, `internal.service.database`; the household profiles, HAS-347), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
   RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279); routed by `api-gateway-service` from HAS-281.
 - Uses libraries: `cholewa-commons` 1.12.0 (`NotificationPublisher.publishHousehold`, the pooled
-  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.13.0
+  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.14.0
   (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.2.0
   (`ShellyGen1Client.meter` - the plugs are Gen1; added to the library for this service in HAS-278).
 - Database: own database `home-automation-appliance`, pool 2 - with it this project holds 18 of the
@@ -110,7 +110,15 @@ review.
   still the appliance's (`clearRunId` by value - the sampling pass may have stored a new cycle meanwhile), then publishes `appliance acknowledged` with the number of reminders sent (no
   `acknowledgePath`; notification-service decides which transports carry it). Not watched: 404; nothing
   finished waiting: 409 `NOTHING_TO_ACKNOWLEDGE` (a second press). Once HAS-343 claims by tag, this
-  endpoint stays as the administrator's mute. **A finished cycle a new one replaced**
+  endpoint stays as the administrator's mute. **Who acknowledged it** (HAS-347, `?member=`, sent by the
+  dashboard from the profile of its personal link): `ApplianceService` checks the name against `GET
+  /home/household/profiles` of database-service (`HouseholdProfilesClient` - the switched-on members, no
+  phones), whatever the case, before anything is acknowledged - `400 UNKNOWN_MEMBER` for a name it does not
+  have; a failed read of the profiles is a WARN and acknowledges without a name (a name is information for
+  the message, never a reason to keep a cycle waiting). The name the registry has goes into
+  `acknowledged_by` (V4) and into `HouseholdNotification.member` of smart-home-sdk 1.14.0, which
+  notification-service >= 0.7.2 words ("... - potwierdza Liwia"); an older notification-service ignores
+  it. Not a proof of the chore - that is the tag claim of HAS-343. **A finished cycle a new one replaced**
   (`Started.replacedUnacknowledged`) is acknowledged in its row at the start of the new one, without a
   message (`RunStore.closeReplaced`, before the new row is inserted).
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
@@ -118,7 +126,7 @@ review.
   night at 03:20 (`SampleRetention`, bounded 15 min).
 - **Times**: `Instant` inside and `timestamptz` in the database; the API answers and takes the
   clock of the house without an offset (`LOCAL_DATE_TIME` of `ApplianceController`, an offset is a
-  400). `NOT_FOUND_APPLIANCE` and `NOTHING_TO_ACKNOWLEDGE` (`ApplianceError`) are wire contract, as are the words of
+  400). `NOT_FOUND_APPLIANCE`, `NOTHING_TO_ACKNOWLEDGE` and `UNKNOWN_MEMBER` (`ApplianceError`) are wire contract, as are the words of
   `ApplianceState` - both pinned by `ApplianceErrorTest`.
 - **Layers of the API**: `ApplianceController` only takes the request; `ApplianceService` holds the logic -
   the lookup of a watched appliance (404), the rules of a range (a `400` as `ResponseStatusException`, as
