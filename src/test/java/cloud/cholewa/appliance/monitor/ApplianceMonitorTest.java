@@ -47,6 +47,7 @@ import static org.mockito.Mockito.when;
 class ApplianceMonitorTest {
 
     private static final Instant T0 = Instant.parse("2026-10-24T08:00:00Z");
+    private static final Instant FALL = T0.plus(Duration.ofHours(2));
     private static final CycleThresholds DRYER = new CycleThresholds(50, 5, Duration.ofMinutes(15), Duration.ofMinutes(3));
     private static final ReminderSettings REMINDERS = new ReminderSettings(Duration.ofMinutes(30), 4, LocalTime.of(23, 0), LocalTime.of(7, 0));
     private static final Appliance DRYER_PLUG = new Appliance(31, "Dryer", RoomName.BOILER, "192.0.2.31", 0, 1, DRYER, REMINDERS);
@@ -273,6 +274,62 @@ class ApplianceMonitorTest {
 
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHED);
         verify(notifier, never()).acknowledged(any(), any(), anyInt(), any());
+    }
+
+    //HAS-348: emptied before the end was certain - ended at the fall and acknowledged in one write, never
+    //announced: only "appliance acknowledged", with no reminder before it
+    @Test
+    void should_acknowledge_a_cycle_still_finishing_without_announcing_it() {
+        final CycleDetector detector = finishing();
+        watch(DRYER_PLUG, detector, 5L);
+        final Instant now = T0.plus(Duration.ofHours(3));
+        when(runStore.finishAcknowledged(eq(31L), eq(5L), any(), eq(now), eq("Anna"))).thenReturn(Mono.just(5L));
+        when(notifier.acknowledged(DRYER_PLUG, now, 0, "Anna")).thenReturn(Mono.just(true));
+
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
+
+        final ArgumentCaptor<Transition.Finished> finished = ArgumentCaptor.forClass(Transition.Finished.class);
+        verify(runStore).finishAcknowledged(eq(31L), eq(5L), finished.capture(), eq(now), eq("Anna"));
+        assertThat(finished.getValue().startedAt()).isEqualTo(T0);
+        assertThat(finished.getValue().finishedAt()).isEqualTo(FALL);
+        verify(notifier).acknowledged(DRYER_PLUG, now, 0, "Anna");
+        verify(notifier, never()).finished(any(), any());
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
+        sut.remind().as(StepVerifier::create).verifyComplete();
+        verify(reminders, never()).check(any(), anyLong());
+    }
+
+    //a row that cannot be written: nobody is told it was acknowledged, and the cycle is finishing again
+    @Test
+    void should_finish_as_usual_when_an_early_acknowledgement_cannot_be_stored() {
+        watch(DRYER_PLUG, finishing(), 5L);
+        when(runStore.finishAcknowledged(anyLong(), any(), any(), any(), any()))
+            .thenReturn(Mono.error(new IllegalStateException("database away")));
+
+        sut.acknowledge(31, null).as(StepVerifier::create).verifyError(IllegalStateException.class);
+
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHING);
+        verify(notifier, never()).acknowledged(any(), any(), anyInt(), any());
+    }
+
+    //shorter than minRunMinutes: no cycle to acknowledge, it stays as it is
+    @Test
+    void should_refuse_to_acknowledge_a_finishing_run_shorter_than_the_minimum() {
+        final CycleDetector detector = CycleDetector.running(FALL.minus(Duration.ofMinutes(5)));
+        detector.sample(FALL, 1.0, null, DRYER);
+        watch(DRYER_PLUG, detector, 5L);
+
+        sut.acknowledge(31, null).as(StepVerifier::create)
+            .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
+            .verify();
+        verify(runStore, never()).finishAcknowledged(anyLong(), any(), any(), any(), any());
+    }
+
+    //a cycle that ran two hours and fell at FALL, its end not certain yet
+    private static CycleDetector finishing() {
+        final CycleDetector detector = CycleDetector.running(T0);
+        detector.sample(FALL, 1.0, null, DRYER);
+        return detector;
     }
 
     private static CycleDetector finished() {

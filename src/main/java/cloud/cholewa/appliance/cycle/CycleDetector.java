@@ -17,6 +17,7 @@ import java.util.Optional;
 //FINISHING -> FINISHED  finishedAfterMinutes below idleBelowWatts, when the cycle lasted at least
 //                       minRunMinutes (start to the fall); a shorter one is discarded, back to IDLE
 //FINISHED -> IDLE       acknowledged or claimed (HAS-279, HAS-343)
+//FINISHING -> IDLE      acknowledged before the end was certain (HAS-348) - ended at the fall, never FINISHED
 //FINISHED -> RUNNING    a new cycle starts, by the rule of IDLE
 //
 //An invalid sample (is_valid false, a failed poll) is not given to the detector: it keeps the state.
@@ -78,6 +79,32 @@ public final class CycleDetector {
         final Instant cycle = startedAt;
         toIdle();
         return Optional.of(new Transition.Acknowledged(cycle));
+    }
+
+    //FINISHING -> IDLE at once (HAS-348): somebody emptied the appliance before its end was certain. The end of
+    //the cycle is the fall of the draw, as it would have been; the cycle never becomes FINISHED, so it is never
+    //announced or reminded. A cycle shorter than minRunMinutes - or one in any other state - stays as it is
+    public synchronized Optional<Transition.Finished> acknowledgeFinishing(final CycleThresholds thresholds) {
+        if (state != ApplianceState.FINISHING
+            || Duration.between(startedAt, finishedAt).compareTo(thresholds.minRun()) < 0) {
+            return Optional.empty();
+        }
+        final Transition.Finished finished = new Transition.Finished(startedAt, finishedAt, energy.wattHours(), maxWatts);
+        toIdle();
+        return Optional.of(finished);
+    }
+
+    //the undo of acknowledgeFinishing when its row could not be stored: FINISHING again, from the same fall - the
+    //next sample ends it as it would have ended (its row written, the household told), unless a new cycle
+    //started meanwhile
+    public synchronized void reopen(final Transition.Finished finished) {
+        if (state != ApplianceState.IDLE || aboveSince != null) {
+            return;
+        }
+        state = ApplianceState.FINISHING;
+        startedAt = finished.startedAt();
+        finishedAt = finished.finishedAt();
+        maxWatts = Math.max(maxWatts, finished.maxWatts());
     }
 
     public synchronized CycleView view() {

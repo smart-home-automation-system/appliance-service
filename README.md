@@ -48,6 +48,7 @@ appliance:
 | `finishing` | `running` | the draw stays at or above `idleBelowWatts` for a minute - a washing machine going on after a pause; a shorter draw (the drum of a dryer turning now and then while it waits to be emptied, HAS-285) is ignored and the end still counts from the fall |
 | `finishing` | `finished` | `finishedAfterMinutes` below `idleBelowWatts`, when the cycle lasted at least `minRunMinutes`; a shorter one is discarded, back to `idle`, nobody is told |
 | `finished` | `idle` | acknowledged (HAS-279) or claimed by a tag (HAS-343) |
+| `finishing` | `idle` | acknowledged before the end was certain (HAS-348): the cycle ends at the fall of the draw, never becomes `finished` and is never announced or reminded - the household gets `appliance acknowledged` only |
 | `finished` | `running` | a new cycle starts |
 
 An invalid sample (`is_valid: false`) or a plug that does not answer keeps the state.
@@ -100,7 +101,7 @@ times are the clock of the house without an offset; a field not known is left ou
 | `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
 | `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt`, `acknowledgedBy` (who acknowledged it in the application, HAS-347) |
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
-| `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished cycle waits, `404 NOT_FOUND_APPLIANCE` |
+| `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; a cycle still `finishing` (HAS-348) is ended at the fall and acknowledged at once, never announced (only `appliance acknowledged` goes out), one shorter than `minRunMinutes` answers 409; `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished or finishing cycle waits, `404 NOT_FOUND_APPLIANCE` |
 
 `from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
 longer range is a `400`. The history is answered for a watched appliance only: one

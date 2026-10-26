@@ -216,6 +216,58 @@ class CycleDetectorTest {
         assertThat(detector.acknowledge()).isEmpty();
     }
 
+    //HAS-348: emptied while finishing - ended at the fall, straight to IDLE, never FINISHED
+    @Test
+    void should_end_a_finishing_cycle_at_its_fall_when_acknowledged() {
+        run(WASHER, 30, 300.0);
+        final Instant fall = now;
+        run(WASHER, 2, 1.0);
+
+        assertThat(detector.acknowledgeFinishing(WASHER)).get().satisfies(finished -> {
+            assertThat(finished.startedAt()).isEqualTo(T0);
+            assertThat(finished.finishedAt()).isEqualTo(fall);
+            assertThat(finished.maxWatts()).isEqualTo(300);
+        });
+        assertThat(detector.view()).isEqualTo(new CycleView(ApplianceState.IDLE, null, null, null));
+
+        run(WASHER, 11, 1.0);
+        assertThat(transitions).containsExactly(new Transition.Started(T0, false));
+    }
+
+    @Test
+    void should_acknowledge_while_finishing_only_a_cycle_long_enough() {
+        run(WASHER, 12, 300.0);         // 6 minutes, below minRunMinutes
+        run(WASHER, 1, 1.0);
+
+        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHING);
+    }
+
+    @Test
+    void should_acknowledge_while_finishing_nothing_in_another_state() {
+        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        run(WASHER, 30, 300.0);
+        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        run(WASHER, 11, 1.0);
+        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHED);
+    }
+
+    //the row could not be written: finishing again from the same fall, ended by the next samples as usual
+    @Test
+    void should_finish_as_usual_after_a_reopen() {
+        run(WASHER, 30, 300.0);
+        final Instant fall = now;
+        run(WASHER, 2, 1.0);
+        final Transition.Finished early = detector.acknowledgeFinishing(WASHER).orElseThrow();
+
+        detector.reopen(early);
+        run(WASHER, 9, 1.0);
+
+        assertThat(transitions).last().isInstanceOfSatisfying(Transition.Finished.class,
+            finished -> assertThat(finished.finishedAt()).isEqualTo(fall));
+    }
+
     @Test
     void should_end_an_unacknowledged_finished_cycle_with_a_new_one() {
         run(WASHER, 30, 300.0);
