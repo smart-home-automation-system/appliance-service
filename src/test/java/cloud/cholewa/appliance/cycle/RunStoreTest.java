@@ -195,6 +195,35 @@ class RunStoreTest {
         assertThat(saved.getValue().acknowledgedBy()).isEqualTo("Anna");
     }
 
+    //HAS-348: the end and the acknowledgement of a cycle emptied while finishing, in one write
+    @Test
+    void should_finish_and_acknowledge_a_cycle_in_one_write() {
+        when(repository.findById(5L)).thenReturn(Mono.just(run(null, null)));
+
+        sut.finishAcknowledged(7, 5L, new Transition.Finished(T0, END, 640L, 2100), END.plusSeconds(90), "Anna")
+            .as(StepVerifier::create).expectNext(5L).verifyComplete();
+
+        final ArgumentCaptor<ApplianceRunEntity> saved = ArgumentCaptor.forClass(ApplianceRunEntity.class);
+        verify(repository).save(saved.capture());
+        assertThat(saved.getValue()).satisfies(run -> {
+            assertThat(run.finishedAt()).isEqualTo(END);
+            assertThat(run.energyWh()).isEqualTo(640L);
+            assertThat(run.maxWatts()).isEqualTo(2100);
+            assertThat(run.acknowledgedAt()).isEqualTo(END.plusSeconds(90));
+            assertThat(run.acknowledgedBy()).isEqualTo("Anna");
+            assertThat(run.notifiedAt()).isNull();
+        });
+    }
+
+    //the caller decides what a failed write means - here it is not swallowed
+    @Test
+    void should_hand_a_failed_early_acknowledgement_to_the_caller() {
+        when(repository.findById(5L)).thenReturn(Mono.error(new IllegalStateException("database away")));
+
+        sut.finishAcknowledged(7, 5L, new Transition.Finished(T0, END, 640L, 2100), END, null)
+            .as(StepVerifier::create).verifyError(IllegalStateException.class);
+    }
+
     private static ApplianceRunEntity run(final Instant finishedAt, final Instant acknowledgedAt) {
         return ApplianceRunEntity.builder().id(5L).deviceId(7).startedAt(T0).finishedAt(finishedAt)
             .acknowledgedAt(acknowledgedAt).build();

@@ -118,7 +118,16 @@ review.
   the message, never a reason to keep a cycle waiting). The name the registry has goes into
   `acknowledged_by` (V4) and into `HouseholdNotification.member` of smart-home-sdk 1.14.0, which
   notification-service >= 0.7.2 words ("... - potwierdza Liwia"); an older notification-service ignores
-  it. Not a proof of the chore - that is the tag claim of HAS-343. **A finished cycle a new one replaced**
+  it. Not a proof of the chore - that is the tag claim of HAS-343. **A cycle still `finishing`** (HAS-348,
+  owner 2026-10-26: somebody heard the end and emptied it before the message): `acknowledgeFinishing` of the
+  detector goes from FINISHING straight to IDLE, so neither the reminder pass (it takes FINISHED only) nor the
+  sampling pass can announce it, then `RunStore.finishAcknowledged` writes the end (the fall) and the
+  acknowledgement in **one** save - no check of the reminders can find the row finished and not acknowledged -
+  and only `appliance acknowledged` (reminder 0, the member) goes out: no `finished`, no reminder (owner). A
+  failed write answers the error and `reopen`s the detector at the same fall, so the next sample ends the cycle
+  as usual, announced. Shorter than `minRunMinutes`: 409. Pressed in a pause of a washing machine (also
+  `finishing`) it ends the cycle early; the rest of the program is a new cycle, announced on its own
+  (accepted). **A finished cycle a new one replaced**
   (`Started.replacedUnacknowledged`) is acknowledged in its row at the start of the new one, without a
   message (`RunStore.closeReplaced`, before the new row is inserted).
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after

@@ -109,6 +109,20 @@ public class RunStore {
     }
 
     private Mono<Long> finish(final long deviceId, final Long runId, final Transition.Finished finished) {
+        return completed(deviceId, runId, finished, UnaryOperator.identity())
+            .onErrorResume(e -> failed("the end of a cycle", deviceId, e, runId));
+    }
+
+    //HAS-348: a cycle acknowledged before its end was certain - its end and its acknowledgement in one write, so
+    //that no check of the reminders ever finds it finished and not acknowledged. A failure is the caller's
+    public Mono<Long> finishAcknowledged(final long deviceId, final Long runId, final Transition.Finished finished,
+                                         final Instant at, final String member) {
+        return completed(deviceId, runId, finished,
+            run -> run.toBuilder().acknowledgedAt(at).acknowledgedBy(member).build());
+    }
+
+    private Mono<Long> completed(final long deviceId, final Long runId, final Transition.Finished finished,
+                                 final UnaryOperator<ApplianceRunEntity> more) {
         final Mono<ApplianceRunEntity> row = runId == null
             ? Mono.empty()
             : applianceRunRepository.findById(runId).filter(run -> sameStart(run, finished));
@@ -120,9 +134,9 @@ public class RunStore {
                 .energyWh(finished.energyWh())
                 .maxWatts(finished.maxWatts())
                 .build())
+            .map(more)
             .flatMap(applianceRunRepository::save)
-            .map(ApplianceRunEntity::id)
-            .onErrorResume(e -> failed("the end of a cycle", deviceId, e, runId));
+            .map(ApplianceRunEntity::id);
     }
 
     //the row of this cycle and not a stale one: timestamptz keeps microseconds, so a start with a finer fraction
