@@ -120,13 +120,14 @@ public class ApplianceMonitor {
     //cycle is never FINISHED and neither the reminder pass nor the sampling pass can announce it - then its end
     //and its acknowledgement in one write, then only "appliance acknowledged" (no reminder before it). A row
     //that cannot be written answers the error and the cycle is finishing again - the next sample ends it as an
-    //ordinary one, announced and reminded. Empty when the detector is not finishing a cycle long enough - the
-    //caller then takes the path of a finished one (409 for anything else)
+    //ordinary one, announced and reminded. A cycle shorter than minRunMinutes is acknowledged too - a member saw
+    //it. Empty when the detector is not finishing - the caller then takes the path of a finished one (409 for
+    //anything else)
     private Mono<Boolean> acknowledgeFinishing(final TrackedAppliance appliance, final String member) {
         final long id = appliance.appliance().id();
         final Long runId = appliance.runId();
         final Instant now = Instant.now(clock);
-        return Mono.defer(() -> Mono.justOrEmpty(appliance.detector().acknowledgeFinishing(appliance.appliance().thresholds())))
+        return Mono.defer(() -> Mono.justOrEmpty(appliance.detector().acknowledgeFinishing()))
             .flatMap(finished -> runStore.finishAcknowledged(id, runId, finished, now, member)
                 .switchIfEmpty(Mono.error(() -> new IllegalStateException("the row of the cycle was not stored")))
                 .doOnError(e -> appliance.detector().reopen(finished)))
