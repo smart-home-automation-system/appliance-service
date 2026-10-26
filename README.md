@@ -61,11 +61,18 @@ the last message, at most `maxReminders`, never between `quietFrom` and `quietTo
 then waits for their end), until the cycle is acknowledged - `POST /home/appliance/{id}/acknowledge`,
 which publishes `appliance acknowledged` - with the `member` who acknowledged it, when the application named one (HAS-347). A new cycle on an unacknowledged appliance closes the old
 one as acknowledged, without a message. What was sent is in the row of the cycle, so a restart sends
-nothing twice, and a message that did not get through is sent again a minute later. What comes next:
+nothing twice, and a message that did not get through is sent again a minute later.
+
+**Since HAS-280 the plugs are watched.** A plug that gives no reading - no answer, or an answer without one
+(`is_valid: false`) - for `appliance.monitor.offline-after` (`PT5M`) hides the end of a cycle, so it is
+announced on the technical channel of `notification-service` (`alert`, English, the alerts channel - never the
+household's): one alert per check naming every plug out, a reminder every `appliance.monitor.reminder-every`
+(`PT1H`), one info when it reads again. Checked every minute from the second; a bare number of either setting is
+minutes. The alerts given live in memory: after a restart an outage still going on is announced again, and the
+return of one announced before it is not. What comes next:
 
 | Task | What |
 |---|---|
-| HAS-280 | the availability monitor of the plugs |
 | HAS-281 | the routes of `api-gateway-service` |
 
 # Run locally

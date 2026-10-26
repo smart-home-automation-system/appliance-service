@@ -1,5 +1,6 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.availability.PlugAvailabilityMonitor;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -15,7 +16,8 @@ import static org.mockito.Mockito.when;
 class MonitorScheduleTest {
 
     private final ApplianceMonitor monitor = mock(ApplianceMonitor.class);
-    private final MonitorSchedule sut = new MonitorSchedule(monitor);
+    private final PlugAvailabilityMonitor availability = mock(PlugAvailabilityMonitor.class);
+    private final MonitorSchedule sut = new MonitorSchedule(monitor, availability);
 
     //a poll hung on a dead plug ends at its bound, below the 30 s between polls
     @Test
@@ -51,8 +53,21 @@ class MonitorScheduleTest {
             .verifyComplete();
     }
 
+    //HAS-280: a check hung on a broker that never confirms ends at its bound, below the minute between checks
+    @Test
+    void should_end_an_availability_check_that_never_completes_at_its_bound() {
+        when(availability.check()).thenReturn(Mono.never());
+
+        StepVerifier.withVirtualTime(sut::availability)
+            .expectSubscription()
+            .expectNoEvent(MonitorSchedule.AVAILABILITY_LIMIT.minusSeconds(1))
+            .thenAwait(Duration.ofSeconds(1))
+            .verifyComplete();
+    }
+
     @Test
     void should_bound_each_pass_below_its_delay() {
+        assertThat(Duration.ofMinutes(1)).isGreaterThan(MonitorSchedule.AVAILABILITY_LIMIT);
         assertThat(Duration.ofSeconds(30)).isGreaterThan(MonitorSchedule.SAMPLE_LIMIT);
         assertThat(Duration.ofMinutes(5)).isGreaterThan(MonitorSchedule.REFRESH_LIMIT);
         assertThat(Duration.ofMinutes(1)).isGreaterThan(MonitorSchedule.REMIND_LIMIT);

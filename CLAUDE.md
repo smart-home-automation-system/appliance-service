@@ -14,7 +14,7 @@ review.
 
 - Talks to: `database-service` (the device registry - the kind `appliance` and its
   `ApplianceSettings`, `internal.service.database`; the household profiles, HAS-347), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
-  RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279); routed by `api-gateway-service` from HAS-281.
+  RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279 - and the alerts and infos of the plugs that stop answering, HAS-280); routed by `api-gateway-service` from HAS-281.
 - Uses libraries: `cholewa-commons` 1.12.0 (`NotificationPublisher.publishHousehold`, the pooled
   `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.14.0
   (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.2.0
@@ -130,6 +130,16 @@ review.
   (accepted). **A finished cycle a new one replaced**
   (`Started.replacedUnacknowledged`) is acknowledged in its row at the start of the new one, without a
   message (`RunStore.closeReplaced`, before the new row is inserted).
+- **The availability of the plugs (HAS-280)**, package `availability`: `TrackedAppliance.failingSince` - the first
+  poll without a reading (no answer or `is_valid: false` alike) since the last reading; `PlugAvailability` (pure,
+  the rules of the monitor of light-service, HAS-264) - out after `appliance.monitor.offline-after` (PT5M, 2 min -
+  1 h), a reminder every `reminder-every` (PT1H, 10 min - 24 h), a return once it reads again, a plug not polled
+  since the start neither out nor back, one no longer watched forgotten unannounced; `PlugAvailabilityMonitor` -
+  every minute from PT2M (`MonitorSchedule.availability`, bounded 55 s), one message per check and kind naming every
+  plug, through `publishAlert` / `publishReminder` / `publishInfo` of the publisher of the household messages - the
+  technical channel, English, never `household`; each cut off after 30 s, and the alerts given move only once the
+  broker took the message. **In memory, like the Shelly monitor of boiler-service**: a restart announces an outage
+  going on again (a duplicate, never a silence) and never the return of one announced before it.
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
   `appliance.sample-retention` (`ApplianceProperties`, 14d, 2-90 days, a bare number is days) every
   night at 03:20 (`SampleRetention`, bounded 15 min).

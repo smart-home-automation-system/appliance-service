@@ -1,5 +1,6 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.availability.PlugAvailabilityMonitor;
 import cloud.cholewa.commons.scheduling.ScheduledPass;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,8 +24,11 @@ public class MonitorSchedule {
     //a read of the row and at most one message per finished cycle, each message cut off after 30 s - with a
     //slow broker the pass may end before the last appliance, which the next minute checks again
     static final Duration REMIND_LIMIT = Duration.ofSeconds(50);
+    //the plugs judged from memory, then at most three messages, each cut off after 30 s (HAS-280)
+    static final Duration AVAILABILITY_LIMIT = Duration.ofSeconds(55);
 
     private final ApplianceMonitor applianceMonitor;
+    private final PlugAvailabilityMonitor plugAvailabilityMonitor;
 
     @Scheduled(initialDelayString = "PT0S", fixedDelayString = "PT5M")
     Mono<Void> refresh() {
@@ -34,6 +38,12 @@ public class MonitorSchedule {
     @Scheduled(initialDelayString = "PT1M", fixedDelayString = "PT1M")
     Mono<Void> remind() {
         return ScheduledPass.bounded("appliance reminders", REMIND_LIMIT, applianceMonitor::remind);
+    }
+
+    //from the second minute: a plug has been read a few times by then
+    @Scheduled(initialDelayString = "PT2M", fixedDelayString = "PT1M")
+    Mono<Void> availability() {
+        return ScheduledPass.bounded("appliance plug availability", AVAILABILITY_LIMIT, plugAvailabilityMonitor::check);
     }
 
     @Scheduled(initialDelayString = "PT15S", fixedDelayString = "PT30S")

@@ -4,6 +4,7 @@ import cloud.cholewa.appliance.cycle.CycleDetector;
 import cloud.cholewa.appliance.power.PowerSample;
 import cloud.cholewa.appliance.registry.Appliance;
 
+import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -18,6 +19,8 @@ final class TrackedAppliance {
     private final AtomicReference<Long> runId;
     private final AtomicReference<PowerSample> lastPoll = new AtomicReference<>();
     private final AtomicReference<PowerSample> lastReading = new AtomicReference<>();
+    //the first of the polls without a reading since the last one with it (HAS-280) - null while the plug reads
+    private final AtomicReference<Instant> failingSince = new AtomicReference<>();
 
     TrackedAppliance(final Appliance appliance, final CycleDetector detector, final Long runId) {
         this.appliance = new AtomicReference<>(appliance);
@@ -56,7 +59,15 @@ final class TrackedAppliance {
         lastPoll.set(sample);
         if (sample.valid()) {
             lastReading.set(sample);
+            failingSince.set(null);
+        } else {
+            //no answer and an answer without a reading count alike: neither shows the end of a cycle
+            failingSince.compareAndSet(null, sample.at());
         }
+    }
+
+    Instant failingSince() {
+        return failingSince.get();
     }
 
     PowerSample lastPoll() {
