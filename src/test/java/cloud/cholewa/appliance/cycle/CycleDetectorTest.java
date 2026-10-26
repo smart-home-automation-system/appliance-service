@@ -68,14 +68,81 @@ class CycleDetectorTest {
         assertThat(detector.view()).isEqualTo(new CycleView(ApplianceState.FINISHED, T0, fall, now.minus(POLL)));
     }
 
-    //a sample between the two thresholds in FINISHING is a pause: anything at or above idleBelowWatts
+    //a draw between the two thresholds in FINISHING for a minute ends the pause: anything at or above idleBelowWatts
     @Test
     void should_take_a_draw_between_the_thresholds_as_a_pause() {
         run(WASHER, 30, 300.0);
         run(WASHER, 4, 1.0);
+        run(WASHER, 2, 5.0);
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHING);
+
         run(WASHER, 1, 5.0);
 
         assertThat(detector.view().state()).isEqualTo(ApplianceState.RUNNING);
+    }
+
+    //the dryer of the house on 2026-10-26 (HAS-285): the drying ended at 480 W, then the drum turned for a few
+    //seconds about every minute while nobody emptied it - one sample of 75-210 W between samples of 2 W
+    @Test
+    void should_end_a_dryer_whose_drum_turns_while_it_waits() {
+        run(DRYER, 120, 480.0);
+        final Instant fall = now;
+        for (int i = 0; i < 4; i++) {
+            run(DRYER, 1, 2.2);
+            run(DRYER, 1, 180.0);
+        }
+
+        assertThat(transitions).hasSize(2).last()
+            .isInstanceOfSatisfying(Transition.Finished.class, finished -> {
+                assertThat(finished.finishedAt()).isEqualTo(fall);
+                assertThat(finished.maxWatts()).isEqualTo(480);
+            });
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHED);
+    }
+
+    //the same turns once the end is announced: shorter than the minute of a start, the cycle keeps waiting
+    @Test
+    void should_keep_a_finished_dryer_waiting_while_its_drum_turns() {
+        run(DRYER, 120, 480.0);
+        run(DRYER, 7, 2.2);
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHED);
+
+        for (int i = 0; i < 10; i++) {
+            run(DRYER, 2, 190.0);
+            run(DRYER, 1, 2.2);
+        }
+
+        assertThat(transitions).hasSize(2);
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHED);
+    }
+
+    //two samples are half a minute: still no end of the pause
+    @Test
+    void should_not_end_a_pause_on_a_draw_shorter_than_a_minute() {
+        run(WASHER, 30, 300.0);
+        run(WASHER, 1, 1.0);
+        final Instant fall = now.minus(POLL);
+        run(WASHER, 2, 300.0);
+        run(WASHER, 9, 1.0);
+
+        assertThat(transitions).last().isInstanceOfSatisfying(Transition.Finished.class,
+            finished -> assertThat(finished.finishedAt()).isEqualTo(fall));
+    }
+
+    //a pause ended by a minute of draw counts the end again from the next fall
+    @Test
+    void should_count_the_end_from_the_next_fall_after_a_pause() {
+        run(WASHER, 30, 300.0);
+        run(WASHER, 4, 1.0);
+        run(WASHER, 3, 300.0);
+        final Instant fall = now;
+        run(WASHER, 9, 1.0);
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHING);
+
+        run(WASHER, 2, 1.0);
+
+        assertThat(transitions).last().isInstanceOfSatisfying(Transition.Finished.class,
+            finished -> assertThat(finished.finishedAt()).isEqualTo(fall));
     }
 
     @Test
