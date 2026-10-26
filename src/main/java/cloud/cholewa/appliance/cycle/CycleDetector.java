@@ -83,10 +83,11 @@ public final class CycleDetector {
 
     //FINISHING -> IDLE at once (HAS-348): somebody emptied the appliance before its end was certain. The end of
     //the cycle is the fall of the draw, as it would have been; the cycle never becomes FINISHED, so it is never
-    //announced or reminded. A cycle shorter than minRunMinutes - or one in any other state - stays as it is
-    public synchronized Optional<Transition.Finished> acknowledgeFinishing(final CycleThresholds thresholds) {
-        if (state != ApplianceState.FINISHING
-            || Duration.between(startedAt, finishedAt).compareTo(thresholds.minRun()) < 0) {
+    //announced or reminded. A cycle shorter than minRunMinutes counts too (owner, 2026-10-26: the six minutes of
+    //a refresh of the dryer): minRunMinutes keeps a draw nobody saw from being announced, and a member who says
+    //they emptied it saw it. Any other state stays as it is
+    public synchronized Optional<Transition.Finished> acknowledgeFinishing() {
+        if (state != ApplianceState.FINISHING) {
             return Optional.empty();
         }
         final Transition.Finished finished = new Transition.Finished(startedAt, finishedAt, energy.wattHours(), maxWatts);

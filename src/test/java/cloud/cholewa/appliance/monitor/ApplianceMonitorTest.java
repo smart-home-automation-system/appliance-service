@@ -312,17 +312,20 @@ class ApplianceMonitorTest {
         verify(notifier, never()).acknowledged(any(), any(), anyInt(), any());
     }
 
-    //shorter than minRunMinutes: no cycle to acknowledge, it stays as it is
+    //shorter than minRunMinutes (the six minutes of a refresh of the dryer): acknowledged all the same
     @Test
-    void should_refuse_to_acknowledge_a_finishing_run_shorter_than_the_minimum() {
+    void should_acknowledge_a_finishing_run_shorter_than_the_minimum() {
         final CycleDetector detector = CycleDetector.running(FALL.minus(Duration.ofMinutes(5)));
         detector.sample(FALL, 1.0, null, DRYER);
         watch(DRYER_PLUG, detector, 5L);
+        final Instant now = T0.plus(Duration.ofHours(3));
+        when(runStore.finishAcknowledged(eq(31L), eq(5L), any(), eq(now), eq("Anna"))).thenReturn(Mono.just(5L));
+        when(notifier.acknowledged(DRYER_PLUG, now, 0, "Anna")).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31, null).as(StepVerifier::create)
-            .expectErrorSatisfies(e -> assertThat(((ApplianceException) e).getError()).isEqualTo(ApplianceError.NOTHING_TO_ACKNOWLEDGE))
-            .verify();
-        verify(runStore, never()).finishAcknowledged(anyLong(), any(), any(), any(), any());
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
+
+        verify(notifier).acknowledged(DRYER_PLUG, now, 0, "Anna");
+        assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
     }
 
     //a cycle that ran two hours and fell at FALL, its end not certain yet

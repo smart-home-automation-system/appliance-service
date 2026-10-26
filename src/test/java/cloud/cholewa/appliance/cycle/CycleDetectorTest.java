@@ -223,7 +223,7 @@ class CycleDetectorTest {
         final Instant fall = now;
         run(WASHER, 2, 1.0);
 
-        assertThat(detector.acknowledgeFinishing(WASHER)).get().satisfies(finished -> {
+        assertThat(detector.acknowledgeFinishing()).get().satisfies(finished -> {
             assertThat(finished.startedAt()).isEqualTo(T0);
             assertThat(finished.finishedAt()).isEqualTo(fall);
             assertThat(finished.maxWatts()).isEqualTo(300);
@@ -234,22 +234,30 @@ class CycleDetectorTest {
         assertThat(transitions).containsExactly(new Transition.Started(T0, false));
     }
 
+    //the refresh of the dryer of 2026-10-26, six minutes: shorter than minRunMinutes, and a member who emptied it
+    //saw it - acknowledged as a cycle, never discarded
     @Test
-    void should_acknowledge_while_finishing_only_a_cycle_long_enough() {
+    void should_acknowledge_while_finishing_a_cycle_shorter_than_the_minimum() {
         run(WASHER, 12, 300.0);         // 6 minutes, below minRunMinutes
+        final Instant fall = now;
         run(WASHER, 1, 1.0);
 
-        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
-        assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHING);
+        assertThat(detector.acknowledgeFinishing()).get().satisfies(finished -> {
+            assertThat(finished.startedAt()).isEqualTo(T0);
+            assertThat(finished.finishedAt()).isEqualTo(fall);
+        });
+        assertThat(detector.view().state()).isEqualTo(ApplianceState.IDLE);
+        run(WASHER, 11, 1.0);
+        assertThat(transitions).containsExactly(new Transition.Started(T0, false));
     }
 
     @Test
     void should_acknowledge_while_finishing_nothing_in_another_state() {
-        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        assertThat(detector.acknowledgeFinishing()).isEmpty();
         run(WASHER, 30, 300.0);
-        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        assertThat(detector.acknowledgeFinishing()).isEmpty();
         run(WASHER, 11, 1.0);
-        assertThat(detector.acknowledgeFinishing(WASHER)).isEmpty();
+        assertThat(detector.acknowledgeFinishing()).isEmpty();
         assertThat(detector.view().state()).isEqualTo(ApplianceState.FINISHED);
     }
 
@@ -259,7 +267,7 @@ class CycleDetectorTest {
         run(WASHER, 30, 300.0);
         final Instant fall = now;
         run(WASHER, 2, 1.0);
-        final Transition.Finished early = detector.acknowledgeFinishing(WASHER).orElseThrow();
+        final Transition.Finished early = detector.acknowledgeFinishing().orElseThrow();
 
         detector.reopen(early);
         run(WASHER, 9, 1.0);

@@ -125,7 +125,7 @@ review.
   acknowledgement in **one** save - no check of the reminders can find the row finished and not acknowledged -
   and only `appliance acknowledged` (reminder 0, the member) goes out: no `finished`, no reminder (owner). A
   failed write answers the error and `reopen`s the detector at the same fall, so the next sample ends the cycle
-  as usual, announced. Shorter than `minRunMinutes`: 409. Pressed in a pause of a washing machine (also
+  as usual, announced. Shorter than `minRunMinutes` it is acknowledged all the same (owner 2026-10-26, the six-minute refresh of the dryer answered 409 four times): the bound keeps a draw nobody saw from being announced, and a member who emptied it saw it - unacknowledged, a short cycle is still discarded. Pressed in a pause of a washing machine (also
   `finishing`) it ends the cycle early; the rest of the program is a new cycle, announced on its own
   (accepted). **A finished cycle a new one replaced**
   (`Started.replacedUnacknowledged`) is acknowledged in its row at the start of the new one, without a
