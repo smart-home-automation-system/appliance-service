@@ -8,7 +8,7 @@ Part of the smart-home-automation-system organization — org-wide conventions, 
 repository map and working rules come from the workspace-level context
 (`organization-repository/claude/organization.md`). The user writes the code in this
 repository themselves; Claude's default role here is analysis, code review and security
-review.
+review - the owner had Claude implement the tag claims (HAS-343), and reviews them in IntelliJ.
 
 ## Role in the system
 
@@ -16,8 +16,8 @@ review.
   `ApplianceSettings`, `internal.service.database`; the household profiles, HAS-347), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
   RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279 - and the alerts and infos of the plugs that stop answering, HAS-280); routed by `api-gateway-service` from HAS-281.
 - Uses libraries: `cholewa-commons` 1.12.0 (`NotificationPublisher.publishHousehold`, the pooled
-  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.14.0
-  (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.2.0
+  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.15.0
+  (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.3.0
   (`ShellyGen1Client.meter` - the plugs are Gen1; added to the library for this service in HAS-278).
 - Database: own database `home-automation-appliance`, pool 2 - with it this project holds 18 of the
   47 connections of the managed PostgreSQL (22 until the plan change of 2026-10-25; the split is in
@@ -27,8 +27,8 @@ review.
 
 ## Build & run
 
-- Build + tests: `mvn verify` - **needs a running Docker** (`ApplianceRepositoriesTest` runs V1 and V2
-  on a PostgreSQL 17 in Testcontainers).
+- Build + tests: `mvn verify` - **needs a running Docker** (`ApplianceRepositoriesTest` runs V1 to V5
+  on a PostgreSQL 17 in Testcontainers - the upsert of the tag counter is PostgreSQL only).
 - Local run: `home,local` Spring profiles, port `6013` (Actuator `8013`); in-cluster port
   `6200`, Actuator `8200`. Needs `rabbitmq-password` (the user `notification`), PostgreSQL
   (`database.*`) and, for the registry, database-service on 6005. **The real `database-*` values
@@ -140,12 +140,42 @@ review.
   technical channel, English, never `household`; each cut off after 30 s, and the alerts given move only once the
   broker took the message. **In memory, like the Shelly monitor of boiler-service**: a restart announces an outage
   going on again (a duplicate, never a silence) and never the return of one announced before it.
+- **The tag claims (HAS-343)**, package `nfc` and `ClaimService`: an NTAG 424 DNA per appliance, set up with NFC.cool
+  Tools on the owner's iPhone (the steps in `deployment-tools/docs/nfc-tag-programming.pdf`): SUN **encrypted** -
+  the UID and the read counter inside `picc_data`, Key 0 as the meta-read and the file-read key, the MAC over
+  nothing else (`SDMMACInputOffset = SDMMACOffset`); the URL is `/t?picc_data=<32 hex>&cmac=<16 hex>`.
+  `SunVerifier.read` is pure: `picc_data` decrypted with AES-CBC (IV 0) under the key must start with `C7` (UID and
+  counter mirrored, a UID of 7 bytes), then UID and counter (least significant byte first); SV2 =
+  `3CC300010080 || UID || counter`, the session key AES-CMAC(key, SV2), the MAC AES-CMAC(session key, empty), the
+  bytes 1, 3, ..., 15 sent (counted from 0 - "even" in NXP's numbering from 1). One key serves both, as on the tags.
+  `AesCmac` is RFC 4493 on the AES of the JDK (no BouncyCastle), pinned on the vectors of the RFC; `SunVerifierTest`
+  is pinned on the encrypted example of AN12196 (`picc_data=EF963FF7828658A599F3041510671E88&cmac=94EED9EE65337086`,
+  UID 04DE5F1EACC040, counter 61 - also the vector of nfc-developer/sdm-backend); a read of a test tag programmed like
+  the others, its key left at the factory zeros, checked out against it before the three were programmed (kept out of
+  the public repository, owner 2026-10-30). `NfcProperties`: `appliance.nfc.key` (32 hex, a required
+  property `appliance-nfc-key`, refused at the start without its value in the message, left out of `toString`) and
+  `appliance.nfc.tags.<uid>: <device id>` (UIDs upper-cased; in the manifest, not the registry, while there are
+  three). **The `test` document quotes its key of zeros** - unquoted YAML reads it as the number 0. The steps of
+  `ClaimService.claim`, each refusing on its own: the tag (`400 INVALID_TAG`, a WARN - with the UID only when it decrypted), the
+  appliance watched (404), the member (`400 UNKNOWN_MEMBER`; profiles that cannot be read are a `503`, never an
+  unchecked name - unlike the acknowledgement, where the name is only information), the counter taken by one
+  `INSERT ... ON CONFLICT ... WHERE last_counter < EXCLUDED.last_counter` (`409 REPLAYED_TAG`; from here the read is
+  spent, so the member and the tag are checked before), then a cycle `finished` or `finishing` is acknowledged through
+  `ApplianceMonitor.acknowledge` (a `NOTHING_TO_ACKNOWLEDGE` of a race is ignored) and the claim attaches to the latest
+  cycle with `finished_at` within `appliance.claim-window` (12h, 1 h - 2 days, a bare number is hours) -
+  `409 NOTHING_TO_CLAIM` otherwise. Several claims per cycle are allowed (HAS-344 shares them). `source` `app` exists
+  in V5 for an attribution from the application, which nothing writes (owner 2026-10-24: the button proves nothing).
+  A failed save of the claim after the acknowledgement leaves the cycle acknowledged without a claim: accepted (owner
+  2026-10-30) - another tap gives a new read with a higher counter, which attaches the claim. `picc_data` and the MAC
+  travel in the body Logbook logs - the UID stays encrypted there, and a MAC is spent once its
+  counter is taken.
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
   `appliance.sample-retention` (`ApplianceProperties`, 14d, 2-90 days, a bare number is days) every
   night at 03:20 (`SampleRetention`, bounded 15 min).
 - **Times**: `Instant` inside and `timestamptz` in the database; the API answers and takes the
   clock of the house without an offset (`LOCAL_DATE_TIME` of `ApplianceController`, an offset is a
-  400). `NOT_FOUND_APPLIANCE`, `NOTHING_TO_ACKNOWLEDGE` and `UNKNOWN_MEMBER` (`ApplianceError`) are wire contract, as are the words of
+  400). `NOT_FOUND_APPLIANCE`, `NOTHING_TO_ACKNOWLEDGE`, `UNKNOWN_MEMBER`, `INVALID_TAG`, `REPLAYED_TAG` and
+  `NOTHING_TO_CLAIM` (`ApplianceError`) are wire contract, as are the words of
   `ApplianceState` - both pinned by `ApplianceErrorTest`.
 - **Layers of the API**: `ApplianceController` only takes the request; `ApplianceService` holds the logic -
   the lookup of a watched appliance (404), the rules of a range (a `400` as `ResponseStatusException`, as

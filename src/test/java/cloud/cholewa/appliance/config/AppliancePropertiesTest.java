@@ -37,6 +37,31 @@ class AppliancePropertiesTest {
         runner.withPropertyValues("appliance.sample-retention=91d").run(context -> assertThat(context).hasFailed());
     }
 
+    //HAS-343: a cycle can be claimed with a tag for twelve hours after its end
+    @Test
+    void should_keep_the_claim_window_at_twelve_hours_by_default() {
+        runner.run(context -> assertThat(context.getBean(ApplianceProperties.class).claimWindow())
+            .isEqualTo(Duration.ofHours(12)));
+    }
+
+    //without the unit a bare number would bind as milliseconds and no claim would ever find its cycle
+    @Test
+    void should_read_a_bare_number_of_the_claim_window_as_hours() {
+        runner.withPropertyValues("appliance.claim-window=6")
+            .run(context -> assertThat(context.getBean(ApplianceProperties.class).claimWindow())
+                .isEqualTo(Duration.ofHours(6)));
+    }
+
+    @Test
+    void should_refuse_a_claim_window_shorter_than_an_hour() {
+        runner.withPropertyValues("appliance.claim-window=59m").run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void should_refuse_a_claim_window_longer_than_two_days() {
+        runner.withPropertyValues("appliance.claim-window=49h").run(context -> assertThat(context).hasFailed());
+    }
+
     @EnableConfigurationProperties(ApplianceProperties.class)
     static class Enabled {
     }

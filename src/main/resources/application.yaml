@@ -53,6 +53,8 @@ cholewa:
   required-properties:
     - property: spring.rabbitmq.password
       variable: rabbitmq-password
+    - property: appliance.nfc.key
+      variable: appliance-nfc-key
   notification:
     enabled: true
     env: prod
@@ -66,6 +68,13 @@ appliance:
   monitor:
     offline-after: PT5M
     reminder-every: PT1H
+  # a cycle can be claimed with its tag up to twelve hours after its end (HAS-343); a bare number is hours
+  claim-window: 12h
+  # the NFC tags on the appliances (HAS-343): the AES-128 key of every tag, 32 hex characters, no default on purpose
+  # (cholewa.required-properties refuses the start without it); the tags - the UID of each and the id of its
+  # appliance in the device registry - come from the manifest (appliance.nfc.tags.<uid>: <device id>)
+  nfc:
+    key: ${appliance-nfc-key}
 
 internal:
   service:
@@ -153,6 +162,12 @@ spring:
 cholewa:
   notification:
     env: dev
+
+# the key a tag leaves the factory with (16 zero bytes) - the one of the example of AN12196
+appliance:
+  nfc:
+    # quoted: unquoted, YAML reads the zeros as the number 0
+    key: "00000000000000000000000000000000"
 
 # second line of defence: SchedulingConfig schedules nothing under this profile, and a test that calls
 # database-service all the same must not reach a real one
