@@ -2,6 +2,8 @@ package cloud.cholewa.appliance.service;
 
 import cloud.cholewa.appliance.api.model.ClaimReply;
 import cloud.cholewa.appliance.api.model.ClaimRequest;
+import cloud.cholewa.appliance.attribution.AttributionRule.Source;
+import cloud.cholewa.appliance.attribution.RunAttribution;
 import cloud.cholewa.appliance.config.ApplianceProperties;
 import cloud.cholewa.appliance.cycle.ApplianceState;
 import cloud.cholewa.appliance.database.model.ApplianceClaimEntity;
@@ -56,6 +58,7 @@ public class ClaimService {
     private final ApplianceRunRepository applianceRunRepository;
     private final ApplianceClaimRepository applianceClaimRepository;
     private final HouseholdProfilesClient householdProfilesClient;
+    private final RunAttribution runAttribution;
     private final Clock clock;
 
     public Mono<ClaimReply> claim(final ClaimRequest request) {
@@ -131,6 +134,8 @@ public class ClaimService {
                 .claimedAt(now)
                 .counter(counter)
                 .build()))
+            //HAS-344: the claim attributes the cycle - never fails the claim
+            .flatMap(claim -> runAttribution.confirmed(claim.runId(), member, Source.NFC).thenReturn(claim))
             .map(claim -> {
                 log.info("{} ({}): cycle {} claimed by {} with its tag", status.appliance().name(), deviceId, claim.runId(), member);
                 return new ClaimReply(deviceId, status.appliance().name(),

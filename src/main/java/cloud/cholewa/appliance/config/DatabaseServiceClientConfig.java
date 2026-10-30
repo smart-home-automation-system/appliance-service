@@ -41,6 +41,22 @@ public class DatabaseServiceClientConfig {
         return webClient(webClientBuilder, databaseServiceConnectionProvider, services.database(), RESPONSE_TIMEOUT);
     }
 
+    //HAS-344: presence-service, who is at home - the same limits; its own pool, so a slow one never holds the
+    //connections of the registry
+    @Bean(destroyMethod = "dispose")
+    ConnectionProvider presenceServiceConnectionProvider() {
+        return connectionProvider("presence-service");
+    }
+
+    @Bean
+    WebClient presenceServiceWebClient(
+        final WebClient.Builder webClientBuilder,
+        final ConnectionProvider presenceServiceConnectionProvider,
+        final InternalServicesProperties services
+    ) {
+        return webClient(webClientBuilder, presenceServiceConnectionProvider, services.presence(), RESPONSE_TIMEOUT);
+    }
+
     static ConnectionProvider connectionProvider(final String name) {
         return ConnectionProvider.builder(name)
             .maxIdleTime(MAX_IDLE_TIME)

@@ -3,7 +3,11 @@ package cloud.cholewa.appliance.service;
 import cloud.cholewa.appliance.api.model.ApplianceReply;
 import cloud.cholewa.appliance.api.model.RunReply;
 import cloud.cholewa.appliance.api.model.SampleReply;
+import cloud.cholewa.appliance.attribution.AttributionRule.Source;
+import cloud.cholewa.appliance.attribution.RunAttribution;
+import cloud.cholewa.appliance.database.model.ApplianceClaimEntity;
 import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
+import cloud.cholewa.appliance.database.repository.ApplianceClaimRepository;
 import cloud.cholewa.appliance.database.repository.ApplianceRunRepository;
 import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
 import cloud.cholewa.appliance.error.ApplianceException;
@@ -41,6 +45,8 @@ public class ApplianceService {
 
     private final ApplianceMonitor applianceMonitor;
     private final ApplianceRunRepository applianceRunRepository;
+    private final ApplianceClaimRepository applianceClaimRepository;
+    private final RunAttribution runAttribution;
     private final ApplianceSampleRepository applianceSampleRepository;
     private final HouseholdProfilesClient householdProfilesClient;
     private final Clock clock;
@@ -53,11 +59,12 @@ public class ApplianceService {
         return watched(id).map(this::reply);
     }
 
-    //the finished cycle acknowledged (HAS-279) - a mute meant for the administrator once the tag claims of
-    //HAS-343 acknowledge for the members: 404 not watched, 409 NOTHING_TO_ACKNOWLEDGE when nothing waits.
+    //the finished cycle acknowledged (HAS-279): 404 not watched, 409 NOTHING_TO_ACKNOWLEDGE when nothing waits.
     //The member who acknowledges it (HAS-347, optional) is checked first against the profiles of the household,
     //whatever the case, and stored and told by the name the registry has: 400 UNKNOWN_MEMBER, and nothing is
-    //acknowledged. A failed read of the profiles never holds the acknowledgement back - it goes without a name
+    //acknowledged. A failed read of the profiles never holds the acknowledgement back - it goes without a name.
+    //HAS-344 (owner 2026-10-30): with a member it is a confirmation equal to a tag read - a claim with source app,
+    //and the cycle attributed; without one it is a mute, the cycle unattributed. Neither fails the acknowledgement
     public Mono<Void> acknowledge(final long id, final String member) {
         return Mono.justOrEmpty(member)
             .map(String::strip)
@@ -65,7 +72,25 @@ public class ApplianceService {
             .flatMap(this::registeredName)
             .map(Optional::of)
             .defaultIfEmpty(Optional.empty())
-            .flatMap(name -> applianceMonitor.acknowledge(id, name.orElse(null)));
+            .flatMap(name -> applianceMonitor.acknowledge(id, name.orElse(null))
+                .flatMap(runId -> name.map(confirmed -> confirmedInTheApplication(runId, confirmed))
+                    .orElseGet(() -> runAttribution.muted(runId))))
+            .then();
+    }
+
+    private Mono<Void> confirmedInTheApplication(final long runId, final String member) {
+        return applianceClaimRepository.save(ApplianceClaimEntity.builder()
+                .runId(runId)
+                .member(member)
+                .source(ApplianceClaimEntity.SOURCE_APP)
+                .claimedAt(Instant.now(clock))
+                .build())
+            .then()
+            .onErrorResume(e -> {
+                log.warn("Could not store the confirmation of cycle {} by {}: {}", runId, member, e.toString());
+                return Mono.empty();
+            })
+            .then(runAttribution.confirmed(runId, member, Source.APP));
     }
 
     private Mono<String> registeredName(final String member) {
@@ -142,7 +167,8 @@ public class ApplianceService {
 
     private RunReply reply(final ApplianceRunEntity run) {
         return new RunReply(run.id(), local(run.startedAt()), local(run.finishedAt()), run.energyWh(), run.maxWatts(),
-            local(run.acknowledgedAt()), run.acknowledgedBy());
+            local(run.acknowledgedAt()), run.acknowledgedBy(), local(run.completedAt()), run.completionSource(),
+            run.attributedTo(), run.attribution(), run.presentAtFinish(), run.presentAtCompletion());
     }
 
     private LocalDateTime local(final Instant instant) {

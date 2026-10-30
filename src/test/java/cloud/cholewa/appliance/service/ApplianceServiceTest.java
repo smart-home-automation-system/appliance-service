@@ -1,5 +1,9 @@
 package cloud.cholewa.appliance.service;
 
+import cloud.cholewa.appliance.attribution.AttributionRule.Source;
+import cloud.cholewa.appliance.attribution.RunAttribution;
+import cloud.cholewa.appliance.database.model.ApplianceClaimEntity;
+import cloud.cholewa.appliance.database.repository.ApplianceClaimRepository;
 import cloud.cholewa.appliance.api.model.ApplianceReply;
 import cloud.cholewa.appliance.api.model.RunReply;
 import cloud.cholewa.appliance.api.model.SampleReply;
@@ -61,7 +65,10 @@ class ApplianceServiceTest {
     private final ApplianceRunRepository runs = mock(ApplianceRunRepository.class);
     private final ApplianceSampleRepository samples = mock(ApplianceSampleRepository.class);
     private final HouseholdProfilesClient profiles = mock(HouseholdProfilesClient.class);
-    private final ApplianceService sut = new ApplianceService(monitor, runs, samples, profiles, Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
+    private final ApplianceClaimRepository claims = mock(ApplianceClaimRepository.class);
+    private final RunAttribution attribution = mock(RunAttribution.class);
+    private final ApplianceService sut = new ApplianceService(monitor, runs, claims, attribution, samples, profiles,
+        Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
 
     @Test
     void should_answer_an_appliance_by_the_clock_of_the_house() {
@@ -109,7 +116,7 @@ class ApplianceServiceTest {
 
         sut.runs(51, LocalDateTime.of(2026, 10, 1, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)).as(StepVerifier::create)
             .expectNext(new RunReply(3, LocalDateTime.of(2026, 10, 24, 10, 0), LocalDateTime.of(2026, 10, 24, 12, 0),
-                812L, 2140, null, null))
+                812L, 2140, null, null, null, null, null, null, null, null))
             .verifyComplete();
     }
 
@@ -141,11 +148,30 @@ class ApplianceServiceTest {
     @Test
     void should_acknowledge_by_the_name_the_registry_has() {
         when(profiles.getProfiles()).thenReturn(Mono.just(List.of(profile("Anna"), profile("Jan"))));
-        when(monitor.acknowledge(51, "Anna")).thenReturn(Mono.empty());
+        when(monitor.acknowledge(51, "Anna")).thenReturn(Mono.just(9L));
+        when(claims.save(any())).thenAnswer(call -> Mono.just(call.getArgument(0)));
+        when(attribution.confirmed(9, "Anna", Source.APP)).thenReturn(Mono.empty());
 
         sut.acknowledge(51, " anna ").as(StepVerifier::create).verifyComplete();
 
         verify(monitor).acknowledge(51, "Anna");
+        //HAS-344 (owner 2026-10-30): with a member it is a confirmation equal to a tag read
+        verify(claims).save(ApplianceClaimEntity.builder().runId(9).member("Anna").source("app").claimedAt(T0).build());
+        verify(attribution).confirmed(9, "Anna", Source.APP);
+        verify(attribution, never()).muted(anyLong());
+    }
+
+    //a confirmation that could not be stored never fails the acknowledgement, and the cycle is still attributed
+    @Test
+    void should_attribute_the_cycle_when_the_confirmation_cannot_be_stored() {
+        when(profiles.getProfiles()).thenReturn(Mono.just(List.of(profile("Anna"))));
+        when(monitor.acknowledge(51, "Anna")).thenReturn(Mono.just(9L));
+        when(claims.save(any())).thenReturn(Mono.error(new IllegalStateException("database away")));
+        when(attribution.confirmed(9, "Anna", Source.APP)).thenReturn(Mono.empty());
+
+        sut.acknowledge(51, "Anna").as(StepVerifier::create).verifyComplete();
+
+        verify(attribution).confirmed(9, "Anna", Source.APP);
     }
 
     //a name the registry does not have: 400, and nothing is acknowledged
@@ -166,17 +192,22 @@ class ApplianceServiceTest {
     @Test
     void should_acknowledge_without_a_name_when_the_profiles_cannot_be_read() {
         when(profiles.getProfiles()).thenReturn(Mono.error(new RegistryCallException("database-service answered 503")));
-        when(monitor.acknowledge(51, null)).thenReturn(Mono.empty());
+        when(monitor.acknowledge(51, null)).thenReturn(Mono.just(9L));
+        when(attribution.muted(9)).thenReturn(Mono.empty());
 
         sut.acknowledge(51, "Anna").as(StepVerifier::create).verifyComplete();
 
         verify(monitor).acknowledge(51, null);
+        //without a checked name it is a mute: unattributed, no claim
+        verify(attribution).muted(9);
+        verifyNoInteractions(claims);
     }
 
     //nobody named (Bruno): no read of the profiles
     @Test
     void should_acknowledge_without_reading_the_profiles_when_nobody_is_named() {
-        when(monitor.acknowledge(51, null)).thenReturn(Mono.empty());
+        when(monitor.acknowledge(51, null)).thenReturn(Mono.just(9L));
+        when(attribution.muted(9)).thenReturn(Mono.empty());
 
         sut.acknowledge(51, null).as(StepVerifier::create).verifyComplete();
         sut.acknowledge(51, "    ").as(StepVerifier::create).verifyComplete();

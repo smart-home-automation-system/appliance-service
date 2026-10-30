@@ -37,7 +37,7 @@ class SampleRetentionTest {
             return now.get();
         }
     };
-    private final SampleRetention sut = new SampleRetention(repository, new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12)), clock);
+    private final SampleRetention sut = new SampleRetention(repository, new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12), Duration.ofMinutes(10)), clock);
 
     //the Mono of a @Scheduled method is subscribed again every night: each night counts back from its own time
     @Test

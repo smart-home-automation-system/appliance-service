@@ -93,8 +93,8 @@ class ApplianceControllerTest {
     @Test
     void should_hand_the_range_of_the_runs_to_the_service() {
         when(applianceService.runs(51, LocalDateTime.of(2026, 10, 1, 0, 0), LocalDateTime.of(2026, 10, 25, 0, 0)))
-            .thenReturn(Flux.just(new RunReply(3, AT, AT.plusHours(2), 812L, 2140, AT.plusHours(3), "Anna"),
-                new RunReply(4, AT.plusHours(10), null, null, null, null, null)));
+            .thenReturn(Flux.just(new RunReply(3, AT, AT.plusHours(2), 812L, 2140, AT.plusHours(3), "Anna", null, null, null, null, null, null),
+                new RunReply(4, AT.plusHours(10), null, null, null, null, null, null, null, null, null, null, null)));
 
         webTestClient.get().uri("/51/runs?from=2026-10-01T00:00:00&to=2026-10-25T00:00:00")
             .exchange()

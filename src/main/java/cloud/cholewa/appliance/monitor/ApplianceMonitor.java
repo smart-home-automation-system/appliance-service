@@ -1,9 +1,11 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.attribution.RunAttribution;
 import cloud.cholewa.appliance.availability.PlugAvailability;
 import cloud.cholewa.appliance.cycle.ApplianceState;
 import cloud.cholewa.appliance.cycle.CycleView;
 import cloud.cholewa.appliance.cycle.RunStore;
+import cloud.cholewa.appliance.cycle.Transition;
 import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
 import cloud.cholewa.appliance.database.model.ApplianceSampleEntity;
 import cloud.cholewa.appliance.database.repository.ApplianceSampleRepository;
@@ -51,6 +53,7 @@ public class ApplianceMonitor {
     private final ApplianceSampleRepository applianceSampleRepository;
     private final Reminders reminders;
     private final HouseholdNotifier householdNotifier;
+    private final RunAttribution runAttribution;
     private final Clock clock;
     private final Map<Long, TrackedAppliance> tracked = new ConcurrentHashMap<>();
 
@@ -85,16 +88,16 @@ public class ApplianceMonitor {
     //waiting (and reminded), then the detector, then the message - which never fails the acknowledgement.
     //Not watched: 404; nothing finished waiting: 409. The member (HAS-347) is a name of the registry already
     //checked by ApplianceService, or null when nobody was named. A cycle still finishing is acknowledged at once
-    //(HAS-348, acknowledgeFinishing) - and one the sampling pass has just finished goes on as a finished one
-    public Mono<Void> acknowledge(final long id, final String member) {
+    //(HAS-348, acknowledgeFinishing) - and one the sampling pass has just finished goes on as a finished one.
+    //Answers the id of the row acknowledged (HAS-344: its attribution is the caller's), empty when there is none
+    public Mono<Long> acknowledge(final long id, final String member) {
         return Mono.justOrEmpty(tracked.get(id))
             .switchIfEmpty(Mono.error(() -> ApplianceException.notFound(id)))
             .flatMap(appliance -> acknowledgeFinishing(appliance, member)
-                .switchIfEmpty(Mono.defer(() -> acknowledgeFinished(appliance, member).thenReturn(true))))
-            .then();
+                .switchIfEmpty(Mono.defer(() -> acknowledgeFinished(appliance, member))));
     }
 
-    private Mono<Void> acknowledgeFinished(final TrackedAppliance appliance, final String member) {
+    private Mono<Long> acknowledgeFinished(final TrackedAppliance appliance, final String member) {
         final long id = appliance.appliance().id();
         return Mono.fromSupplier(appliance::runId)
             .filter(runId -> appliance.detector().view().state() == ApplianceState.FINISHED)
@@ -113,8 +116,8 @@ public class ApplianceMonitor {
                         appliance.clearRunId(runId);
                     })
                     .flatMap(remindersSent ->
-                        householdNotifier.acknowledged(appliance.appliance(), now, remindersSent, member))))
-            .then();
+                        householdNotifier.acknowledged(appliance.appliance(), now, remindersSent, member))
+                    .thenReturn(runId)));
     }
 
     //HAS-348: emptied before the end was certain. The detector first - from FINISHING straight to IDLE, so the
@@ -124,7 +127,7 @@ public class ApplianceMonitor {
     //ordinary one, announced and reminded. A cycle shorter than minRunMinutes is acknowledged too - a member saw
     //it. Empty when the detector is not finishing - the caller then takes the path of a finished one (409 for
     //anything else)
-    private Mono<Boolean> acknowledgeFinishing(final TrackedAppliance appliance, final String member) {
+    private Mono<Long> acknowledgeFinishing(final TrackedAppliance appliance, final String member) {
         final long id = appliance.appliance().id();
         final Long runId = appliance.runId();
         final Instant now = Instant.now(clock);
@@ -137,7 +140,10 @@ public class ApplianceMonitor {
                     Objects.requireNonNullElse(member, "nobody named"));
                 appliance.clearRunId(runId);
                 appliance.clearRunId(storedRunId);
-                return householdNotifier.acknowledged(appliance.appliance(), now, 0, member);
+                //it finished in this write: who was at home then (HAS-344)
+                return runAttribution.finished(storedRunId)
+                    .then(Mono.defer(() -> householdNotifier.acknowledged(appliance.appliance(), now, 0, member)))
+                    .thenReturn(storedRunId);
             });
     }
 
@@ -203,7 +209,11 @@ public class ApplianceMonitor {
                 return runStore.write(deviceId, appliance.runId(), transition)
                     .map(Optional::of)
                     .defaultIfEmpty(Optional.empty())
-                    .doOnNext(runId -> appliance.runId(runId.orElse(null)));
+                    .doOnNext(runId -> appliance.runId(runId.orElse(null)))
+                    //HAS-344: who is at home when a cycle finishes - never fails the pass
+                    .flatMap(runId -> Mono.justOrEmpty(runId)
+                        .filter(stored -> transition instanceof Transition.Finished)
+                        .flatMap(runAttribution::finished));
             })
             .then();
     }

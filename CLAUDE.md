@@ -8,7 +8,8 @@ Part of the smart-home-automation-system organization — org-wide conventions, 
 repository map and working rules come from the workspace-level context
 (`organization-repository/claude/organization.md`). The user writes the code in this
 repository themselves; Claude's default role here is analysis, code review and security
-review - the owner had Claude implement the tag claims (HAS-343), and reviews them in IntelliJ.
+review - the owner had Claude implement the tag claims (HAS-343) and their attribution (HAS-344), and reviews them in
+IntelliJ.
 
 ## Role in the system
 
@@ -27,11 +28,11 @@ review - the owner had Claude implement the tag claims (HAS-343), and reviews th
 
 ## Build & run
 
-- Build + tests: `mvn verify` - **needs a running Docker** (`ApplianceRepositoriesTest` runs V1 to V5
+- Build + tests: `mvn verify` - **needs a running Docker** (`ApplianceRepositoriesTest` runs V1 to V6
   on a PostgreSQL 17 in Testcontainers - the upsert of the tag counter is PostgreSQL only).
 - Local run: `home,local` Spring profiles, port `6013` (Actuator `8013`); in-cluster port
   `6200`, Actuator `8200`. Needs `rabbitmq-password` (the user `notification`), PostgreSQL
-  (`database.*`) and, for the registry, database-service on 6005. **The real `database-*` values
+  (`database.*`) and, for the registry, database-service on 6005 and, for who is at home (HAS-344), presence-service on 6009. **The real `database-*` values
   are the production database** - a migration is rehearsed on a throwaway PostgreSQL, never by a
   local run.
 - Spring Boot 4.1.2, logbook 4.2.0; own libraries on the latest releases, as the org rule asks of
@@ -163,12 +164,31 @@ review - the owner had Claude implement the tag claims (HAS-343), and reviews th
   spent, so the member and the tag are checked before), then a cycle `finished` or `finishing` is acknowledged through
   `ApplianceMonitor.acknowledge` (a `NOTHING_TO_ACKNOWLEDGE` of a race is ignored) and the claim attaches to the latest
   cycle with `finished_at` within `appliance.claim-window` (12h, 1 h - 2 days, a bare number is hours) -
-  `409 NOTHING_TO_CLAIM` otherwise. Several claims per cycle are allowed (HAS-344 shares them). `source` `app` exists
-  in V5 for an attribution from the application, which nothing writes (owner 2026-10-24: the button proves nothing).
+  `409 NOTHING_TO_CLAIM` otherwise. Several claims per cycle are allowed (HAS-344 shares them); `source` `app` is
+  written by "Emptied" in the application since HAS-344.
   A failed save of the claim after the acknowledgement leaves the cycle acknowledged without a claim: accepted (owner
   2026-10-30) - another tap gives a new read with a higher counter, which attaches the claim. `picc_data` and the MAC
   travel in the body Logbook logs - the UID stays encrypted there, and a MAC is spent once its
   counter is taken.
+- **The attribution (HAS-344)**, packages `attribution` and `presence`. **Owner 2026-10-30, supersedes "the button
+  proves nothing"**: a tag read (`nfc`) and "Emptied" in the application with a member (`app`,
+  `ApplianceService.acknowledge`, stored as a claim) are equal confirmations; an acknowledgement without a member is a
+  mute. `AttributionRule` is the pure rule (pinned by `AttributionRuleTest`): first confirmation `single`; another
+  member within `appliance.attribution-window` (10m, 1 min - 1 h, a bare number is minutes, counted from
+  `completed_at`) `shared`; the same member again or a mute changes nothing; a mute completes `unattributed`, a
+  later confirmation attributes it and the completion stays the mute's. `RunAttribution` applies it to
+  `appliance_run` (V6) and **never fails its caller** (a WARN; the claims stay in `appliance_claim`); a row completed
+  in a way this version cannot read is never completed anew. **It writes its own columns only, conditionally**
+  (`ApplianceRunRepository.presentAtFinish` / `complete`, `attribution IS NOT DISTINCT FROM` the one it was computed
+  from): a save of the whole row raced the reminder pass, which saves the row too - a lost `notified_at` announces a
+  cycle twice. The reverse window (a whole-row save of `RunStore` read before an attribution and written after it)
+  stays, milliseconds wide - `RunStore` reads the row again just before each of its saves. The presence (`PresenceClient`,
+  `internal.service.presence`, its own connection pool on the limits of the registry client): the names answered
+  `present: true`, 5 s, kept 60 s; a failure, an empty list or a body that is not the list is `null` (not known) -
+  an empty array is nobody. Snapshots: at the finish (the sampling pass after a `Finished` write, and the HAS-348
+  path - written once) and at the first completion. `ApplianceMonitor.acknowledge` answers the id of the row it
+  acknowledged. `GET /{id}` still describes the appliance now: the attribution is read per cycle from `/runs`. The
+  words of V6 (`nfc`/`app`/`mute`, `single`/`shared`/`unattributed`) are what HAS-345 reads.
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
   `appliance.sample-retention` (`ApplianceProperties`, 14d, 2-90 days, a bare number is days) every
   night at 03:20 (`SampleRetention`, bounded 15 min).
