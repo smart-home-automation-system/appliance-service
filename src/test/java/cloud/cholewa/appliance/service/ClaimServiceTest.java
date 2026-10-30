@@ -1,5 +1,7 @@
 package cloud.cholewa.appliance.service;
 
+import cloud.cholewa.appliance.attribution.AttributionRule.Source;
+import cloud.cholewa.appliance.attribution.RunAttribution;
 import cloud.cholewa.appliance.api.model.ClaimReply;
 import cloud.cholewa.appliance.api.model.ClaimRequest;
 import cloud.cholewa.appliance.config.ApplianceProperties;
@@ -72,11 +74,12 @@ class ClaimServiceTest {
     private final ApplianceRunRepository runs = mock(ApplianceRunRepository.class);
     private final ApplianceClaimRepository claims = mock(ApplianceClaimRepository.class);
     private final HouseholdProfilesClient profiles = mock(HouseholdProfilesClient.class);
+    private final RunAttribution attribution = mock(RunAttribution.class);
     private final ClaimService sut = new ClaimService(
         new SunVerifier(new byte[16]),
         new NfcProperties("00000000000000000000000000000000", Map.of(UID.toLowerCase(), 51L)),
-        new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12)),
-        monitor, tags, runs, claims, profiles,
+        new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12), Duration.ofMinutes(10)),
+        monitor, tags, runs, claims, profiles, attribution,
         Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
 
     @BeforeEach
@@ -84,6 +87,7 @@ class ClaimServiceTest {
         when(profiles.getProfiles()).thenReturn(Mono.just(List.of(profile("Anna"), profile("Jan"))));
         when(tags.advance(anyString(), anyLong(), anyInt(), any())).thenReturn(Mono.just(1));
         when(monitor.acknowledge(anyLong(), anyString())).thenReturn(Mono.empty());
+        when(attribution.confirmed(anyLong(), anyString(), any())).thenReturn(Mono.empty());
         when(claims.save(any())).thenAnswer(call -> {
             final ApplianceClaimEntity claim = call.getArgument(0);
             return Mono.just(ApplianceClaimEntity.builder().id(900L).runId(claim.runId()).member(claim.member())
@@ -104,6 +108,8 @@ class ClaimServiceTest {
         verify(tags).advance(UID, 51, 61, T0);
         verify(monitor).acknowledge(51, "Anna");
         verify(claims).save(ApplianceClaimEntity.builder().runId(77).member("Anna").source("nfc").claimedAt(T0).counter(61).build());
+        //HAS-344: the claim attributes the cycle
+        verify(attribution).confirmed(77, "Anna", Source.NFC);
     }
 
     //HAS-348: emptied before the end was certain - the acknowledgement of a finishing cycle writes its end
@@ -183,8 +189,8 @@ class ClaimServiceTest {
         final ClaimService withoutTheTag = new ClaimService(
             new SunVerifier(new byte[16]),
             new NfcProperties("00000000000000000000000000000000", Map.of("04DE5F1EACC041", 51L)),
-            new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12)),
-            monitor, tags, runs, claims, profiles,
+            new ApplianceProperties(Duration.ofDays(14), Duration.ofHours(12), Duration.ofMinutes(10)),
+            monitor, tags, runs, claims, profiles, attribution,
             Clock.fixed(T0, ZoneId.of("Europe/Warsaw")));
 
         withoutTheTag.claim(request("Anna")).as(StepVerifier::create)

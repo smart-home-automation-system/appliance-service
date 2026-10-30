@@ -20,6 +20,7 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -202,6 +203,66 @@ class ApplianceRepositoriesTest {
                 assertThat(claim.source()).isEqualTo("nfc");
                 assertThat(claim.claimedAt()).isEqualTo(T0.plusSeconds(4000));
                 assertThat(claim.counter()).isEqualTo(12);
+            })
+            .verifyComplete();
+    }
+
+    //HAS-344 (V6): the lists of names as text arrays - empty is nobody, null not known - and a confirmation in the
+    //application stored as a claim of its own source
+    @Test
+    void should_store_the_attribution_of_a_cycle() {
+        final ApplianceRunEntity run = runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0)
+            .finishedAt(T0.plusSeconds(3600)).presentAtFinish(List.of()).build()).block();
+
+        runs.save(run.toBuilder().completedAt(T0.plusSeconds(4000)).completionSource("app")
+                .attributedTo(List.of("Anna", "Jan")).attribution("shared").build())
+            .then(runs.findById(run.id()))
+            .as(StepVerifier::create)
+            .assertNext(stored -> {
+                assertThat(stored.presentAtFinish()).isEmpty();
+                assertThat(stored.presentAtCompletion()).isNull();
+                assertThat(stored.attributedTo()).containsExactly("Anna", "Jan");
+                assertThat(stored.attribution()).isEqualTo("shared");
+                assertThat(stored.completionSource()).isEqualTo("app");
+                assertThat(stored.completedAt()).isEqualTo(T0.plusSeconds(4000));
+            })
+            .verifyComplete();
+
+        claims.save(ApplianceClaimEntity.builder().runId(run.id()).member("Anna").source("app")
+                .claimedAt(T0.plusSeconds(4000)).build())
+            .as(StepVerifier::create)
+            .assertNext(claim -> assertThat(claim.counter()).isNull())
+            .verifyComplete();
+    }
+
+    //HAS-344: the conditional writes of the attribution - the presence at the finish once, an attribution only over the
+    //one it was computed from, the presence at the completion kept once known, null bound as not known
+    @Test
+    void should_write_the_attribution_conditionally() {
+        final ApplianceRunEntity run = runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0)
+            .finishedAt(T0.plusSeconds(3600)).build()).block();
+        final long id = run.id();
+
+        runs.presentAtFinish(id, new String[]{"Anna"})
+            .then(runs.presentAtFinish(id, new String[]{"Jan"}))
+            .as(StepVerifier::create).expectNext(0).verifyComplete();
+
+        runs.complete(id, T0.plusSeconds(4000), "nfc", new String[]{"Anna"}, "single", null, null)
+            .as(StepVerifier::create).expectNext(1).verifyComplete();
+        //computed from a cycle not completed yet, after it was: changes nothing
+        runs.complete(id, T0.plusSeconds(4001), "app", new String[]{"Jan"}, "single", new String[]{"Jan"}, null)
+            .as(StepVerifier::create).expectNext(0).verifyComplete();
+        runs.complete(id, T0.plusSeconds(4000), "nfc", new String[]{"Anna", "Jan"}, "shared", new String[]{"Anna"}, "single")
+            .as(StepVerifier::create).expectNext(1).verifyComplete();
+
+        runs.findById(id).as(StepVerifier::create)
+            .assertNext(stored -> {
+                assertThat(stored.presentAtFinish()).containsExactly("Anna");
+                assertThat(stored.completedAt()).isEqualTo(T0.plusSeconds(4000));
+                assertThat(stored.completionSource()).isEqualTo("nfc");
+                assertThat(stored.attributedTo()).containsExactly("Anna", "Jan");
+                assertThat(stored.attribution()).isEqualTo("shared");
+                assertThat(stored.presentAtCompletion()).containsExactly("Anna");
             })
             .verifyComplete();
     }

@@ -20,4 +20,6 @@ public record ApplianceClaimEntity(
 ) {
 
     public static final String SOURCE_NFC = "nfc";
+    //"Emptied" in the application with a member (HAS-344, owner 2026-10-30: equal to a tag read)
+    public static final String SOURCE_APP = "app";
 }

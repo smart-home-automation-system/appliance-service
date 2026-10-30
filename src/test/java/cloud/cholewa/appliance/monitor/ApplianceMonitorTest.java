@@ -1,5 +1,6 @@
 package cloud.cholewa.appliance.monitor;
 
+import cloud.cholewa.appliance.attribution.RunAttribution;
 import cloud.cholewa.appliance.cycle.ApplianceState;
 import cloud.cholewa.appliance.cycle.CycleDetector;
 import cloud.cholewa.appliance.cycle.CycleThresholds;
@@ -59,13 +60,15 @@ class ApplianceMonitorTest {
     private final ApplianceSampleRepository samples = mock(ApplianceSampleRepository.class);
     private final Reminders reminders = mock(Reminders.class);
     private final HouseholdNotifier notifier = mock(HouseholdNotifier.class);
-    private final ApplianceMonitor sut = new ApplianceMonitor(registry, runStore, reader, samples, reminders, notifier,
+    private final RunAttribution attribution = mock(RunAttribution.class);
+    private final ApplianceMonitor sut = new ApplianceMonitor(registry, runStore, reader, samples, reminders, notifier, attribution,
         Clock.fixed(T0.plus(Duration.ofHours(3)), ZoneId.of("Europe/Warsaw")));
 
     @BeforeEach
     void setUp() {
         when(samples.save(any())).thenAnswer(call -> Mono.just(call.getArgument(0)));
         when(reminders.check(any(), anyLong())).thenReturn(Mono.empty());
+        when(attribution.finished(anyLong())).thenReturn(Mono.empty());
     }
 
     @Test
@@ -157,6 +160,8 @@ class ApplianceMonitorTest {
 
         verify(runStore).write(31, null, new Transition.Started(T0, false));
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.RUNNING);
+        //a start is no finish: nobody asks who is at home
+        verify(attribution, never()).finished(anyLong());
     }
 
     @Test
@@ -174,6 +179,8 @@ class ApplianceMonitorTest {
         //announced by the minute check, never by the sampling pass a slow broker would stall
         verify(reminders, never()).check(any(), anyLong());
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.FINISHED);
+        //HAS-344: who is at home when it finished
+        verify(attribution).finished(5L);
     }
 
     //an invalid answer or a plug that does not answer: nothing stored, nothing given to the detector
@@ -229,7 +236,7 @@ class ApplianceMonitorTest {
             .startedAt(T0).remindersSent(2).acknowledgedAt(now).build()));
         when(notifier.acknowledged(DRYER_PLUG, now, 2, "Anna")).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).expectNext(5L).verifyComplete();
 
         verify(notifier).acknowledged(DRYER_PLUG, now, 2, "Anna");
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
@@ -258,7 +265,7 @@ class ApplianceMonitorTest {
         when(runStore.acknowledge(eq(5L), any(), isNull())).thenReturn(Mono.empty());
         when(notifier.acknowledged(eq(DRYER_PLUG), any(), eq(0), isNull())).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31, null).as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, null).as(StepVerifier::create).expectNext(5L).verifyComplete();
 
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
         verify(notifier).acknowledged(eq(DRYER_PLUG), any(), eq(0), isNull());
@@ -286,7 +293,7 @@ class ApplianceMonitorTest {
         when(runStore.finishAcknowledged(eq(31L), eq(5L), any(), eq(now), eq("Anna"))).thenReturn(Mono.just(5L));
         when(notifier.acknowledged(DRYER_PLUG, now, 0, "Anna")).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).expectNext(5L).verifyComplete();
 
         final ArgumentCaptor<Transition.Finished> finished = ArgumentCaptor.forClass(Transition.Finished.class);
         verify(runStore).finishAcknowledged(eq(31L), eq(5L), finished.capture(), eq(now), eq("Anna"));
@@ -294,6 +301,8 @@ class ApplianceMonitorTest {
         assertThat(finished.getValue().finishedAt()).isEqualTo(FALL);
         verify(notifier).acknowledged(DRYER_PLUG, now, 0, "Anna");
         verify(notifier, never()).finished(any(), any());
+        //HAS-344: it finished in this write - who was at home then
+        verify(attribution).finished(5L);
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);
         sut.remind().as(StepVerifier::create).verifyComplete();
         verify(reminders, never()).check(any(), anyLong());
@@ -322,7 +331,7 @@ class ApplianceMonitorTest {
         when(runStore.finishAcknowledged(eq(31L), eq(5L), any(), eq(now), eq("Anna"))).thenReturn(Mono.just(5L));
         when(notifier.acknowledged(DRYER_PLUG, now, 0, "Anna")).thenReturn(Mono.just(true));
 
-        sut.acknowledge(31, "Anna").as(StepVerifier::create).verifyComplete();
+        sut.acknowledge(31, "Anna").as(StepVerifier::create).expectNext(5L).verifyComplete();
 
         verify(notifier).acknowledged(DRYER_PLUG, now, 0, "Anna");
         assertThat(sut.status(31)).get().extracting(status -> status.cycle().state()).isEqualTo(ApplianceState.IDLE);

@@ -19,7 +19,9 @@ import java.time.temporal.ChronoUnit;
  * of 90 days keeps the table at about 800 000 rows.<br>
  * {@code appliance.claim-window} - how long after its end a cycle can still be claimed with a tag (HAS-343). A
  * bare number is hours; at least an hour, so a bare number read as milliseconds can never shut every claim out,
- * at most two days.
+ * at most two days.<br>
+ * {@code appliance.attribution-window} - how long after a cycle was confirmed a second member may still share it
+ * (HAS-344, half each). A bare number is minutes; 1 minute to an hour.
  */
 @Validated
 @ConfigurationProperties(prefix = "appliance")
@@ -27,6 +29,8 @@ public record ApplianceProperties(
     @NotNull @DurationMin(days = 2) @DurationMax(days = 90) @DurationUnit(ChronoUnit.DAYS)
     @DefaultValue("14d") Duration sampleRetention,
     @NotNull @DurationMin(hours = 1) @DurationMax(days = 2) @DurationUnit(ChronoUnit.HOURS)
-    @DefaultValue("12h") Duration claimWindow
+    @DefaultValue("12h") Duration claimWindow,
+    @NotNull @DurationMin(minutes = 1) @DurationMax(hours = 1) @DurationUnit(ChronoUnit.MINUTES)
+    @DefaultValue("10m") Duration attributionWindow
 ) {
 }

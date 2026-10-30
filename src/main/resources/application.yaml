@@ -70,6 +70,9 @@ appliance:
     reminder-every: PT1H
   # a cycle can be claimed with its tag up to twelve hours after its end (HAS-343); a bare number is hours
   claim-window: 12h
+  # a second member confirming a cycle within ten minutes of the first shares it, half each (HAS-344); a bare number
+  # is minutes
+  attribution-window: 10m
   # the NFC tags on the appliances (HAS-343): the AES-128 key of every tag, 32 hex characters, no default on purpose
   # (cholewa.required-properties refuses the start without it); the tags - the UID of each and the id of its
   # appliance in the device registry - come from the manifest (appliance.nfc.tags.<uid>: <device id>)
@@ -79,6 +82,8 @@ appliance:
 internal:
   service:
     database: http://database-service:6200
+    # who is at home when a cycle finishes and when it is completed (HAS-344)
+    presence: http://presence-service:6200
 
 server:
   port: 6200
@@ -130,6 +135,7 @@ cholewa:
 internal:
   service:
     database: http://localhost:6005
+    presence: http://localhost:6009
 
 server:
   port: 6013
@@ -174,6 +180,7 @@ appliance:
 internal:
   service:
     database: http://localhost:1
+    presence: http://localhost:1
 
 logbook:
   format:
