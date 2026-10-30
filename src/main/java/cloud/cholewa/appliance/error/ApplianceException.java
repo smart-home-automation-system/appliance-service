@@ -31,4 +31,20 @@ public class ApplianceException extends RuntimeException {
         return new ApplianceException(HttpStatus.BAD_REQUEST, ApplianceError.UNKNOWN_MEMBER,
             "No switched-on household member is named " + member);
     }
+
+    //the UID only - never the counter or the MAC, which say nothing to the caller
+    public static ApplianceException invalidTag() {
+        return new ApplianceException(HttpStatus.BAD_REQUEST, ApplianceError.INVALID_TAG,
+            "The read is not a valid read of a tag of an appliance");
+    }
+
+    public static ApplianceException replayedTag(final String uid) {
+        return new ApplianceException(HttpStatus.CONFLICT, ApplianceError.REPLAYED_TAG,
+            "The read of tag " + uid + " was taken before");
+    }
+
+    public static ApplianceException nothingToClaim(final long id) {
+        return new ApplianceException(HttpStatus.CONFLICT, ApplianceError.NOTHING_TO_CLAIM,
+            "Appliance " + id + " has no cycle finished within the claim window");
+    }
 }

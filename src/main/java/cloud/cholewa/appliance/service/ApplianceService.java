@@ -70,15 +70,20 @@ public class ApplianceService {
 
     private Mono<String> registeredName(final String member) {
         return householdProfilesClient.getProfiles()
-            .flatMap(profiles -> Mono.justOrEmpty(profiles.stream()
-                    .map(HouseholdProfile::getName)
-                    .filter(member::equalsIgnoreCase)
-                    .findFirst())
+            .flatMap(profiles -> Mono.justOrEmpty(registeredName(profiles, member))
                 .switchIfEmpty(Mono.error(() -> ApplianceException.unknownMember(member))))
             .onErrorResume(e -> !(e instanceof ApplianceException), e -> {
                 log.warn("The member who acknowledges could not be checked, acknowledged without a name: {}", e.toString());
                 return Mono.empty();
             });
+    }
+
+    //the name the registry has for a member, whatever the case - also the check of a tag claim (HAS-343)
+    static Optional<String> registeredName(final List<HouseholdProfile> profiles, final String member) {
+        return profiles.stream()
+            .map(HouseholdProfile::getName)
+            .filter(member::equalsIgnoreCase)
+            .findFirst();
     }
 
     //the cycles that started in [from, to), at most 31 days

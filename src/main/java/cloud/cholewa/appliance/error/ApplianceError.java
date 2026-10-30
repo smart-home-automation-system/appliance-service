@@ -19,7 +19,16 @@ public enum ApplianceError implements ErrorId {
     NOTHING_TO_ACKNOWLEDGE("Nothing to acknowledge"),
 
     //the member who acknowledges is no switched-on member of the household registry (HAS-347)
-    UNKNOWN_MEMBER("Unknown household member");
+    UNKNOWN_MEMBER("Unknown household member"),
+
+    //a tag read that is not a tag of an appliance: an unknown UID or a MAC the key does not give (HAS-343)
+    INVALID_TAG("Invalid tag"),
+
+    //a tag read whose counter is not above the last one taken - a link read before, copied or bookmarked (HAS-343)
+    REPLAYED_TAG("Replayed tag read"),
+
+    //the appliance of the tag has no cycle finished within the claim window (HAS-343)
+    NOTHING_TO_CLAIM("Nothing to claim");
 
     private final String description;
 }

@@ -1,5 +1,6 @@
 package cloud.cholewa.appliance.database.repository;
 
+import cloud.cholewa.appliance.database.model.ApplianceClaimEntity;
 import cloud.cholewa.appliance.database.model.ApplianceRunEntity;
 import cloud.cholewa.appliance.database.model.ApplianceSampleEntity;
 import org.flywaydb.core.Flyway;
@@ -22,7 +23,7 @@ import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-//On the tables V1 and V2 create, in a PostgreSQL in Docker (Testcontainers) - the migrations are the
+//On the tables V1 to V5 create, in a PostgreSQL in Docker (Testcontainers) - the migrations are the
 //PostgreSQL ones the pod runs. Without a Docker the test fails, it is not skipped
 @DataR2dbcTest
 @Testcontainers
@@ -39,6 +40,10 @@ class ApplianceRepositoriesTest {
     private ApplianceRunRepository runs;
     @Autowired
     private ApplianceSampleRepository samples;
+    @Autowired
+    private ApplianceTagRepository tags;
+    @Autowired
+    private ApplianceClaimRepository claims;
 
     @DynamicPropertySource
     static void connectToTheContainer(final DynamicPropertyRegistry registry) {
@@ -58,6 +63,8 @@ class ApplianceRepositoriesTest {
 
     @BeforeEach
     void forgetEverything() {
+        claims.deleteAll().as(StepVerifier::create).verifyComplete();
+        tags.deleteAll().as(StepVerifier::create).verifyComplete();
         runs.deleteAll().as(StepVerifier::create).verifyComplete();
         samples.deleteAll().as(StepVerifier::create).verifyComplete();
     }
@@ -147,5 +154,55 @@ class ApplianceRepositoriesTest {
 
         samples.deleteOlderThan(T0.plusSeconds(30)).as(StepVerifier::create).expectNext(1L).verifyComplete();
         samples.count().as(StepVerifier::create).expectNext(2L).verifyComplete();
+    }
+
+    //HAS-343: the latest finished cycle, whatever started after it
+    @Test
+    void should_find_the_latest_finished_run_of_an_appliance() {
+        runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0).finishedAt(T0.plus(Duration.ofHours(1))).build()).block();
+        runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0.plus(Duration.ofHours(2)))
+            .finishedAt(T0.plus(Duration.ofHours(3))).build()).block();
+        runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0.plus(Duration.ofHours(4))).build()).block();
+        runs.save(ApplianceRunEntity.builder().deviceId(8).startedAt(T0.plus(Duration.ofHours(5)))
+            .finishedAt(T0.plus(Duration.ofHours(6))).build()).block();
+
+        runs.findFirstByDeviceIdAndFinishedAtIsNotNullOrderByFinishedAtDesc(7).as(StepVerifier::create)
+            .assertNext(run -> assertThat(run.finishedAt()).isEqualTo(T0.plus(Duration.ofHours(3))))
+            .verifyComplete();
+    }
+
+    //HAS-343: the first read of a tag is taken, a higher counter moves it on, the same or a lower one is a replay
+    @Test
+    void should_take_the_counter_of_a_tag_only_when_it_is_above_the_stored_one() {
+        tags.advance("04A1B2C3D4E5F6", 31, 5, T0).as(StepVerifier::create).expectNext(1).verifyComplete();
+        tags.advance("04A1B2C3D4E5F6", 31, 5, T0.plusSeconds(1)).as(StepVerifier::create).expectNext(0).verifyComplete();
+        tags.advance("04A1B2C3D4E5F6", 31, 4, T0.plusSeconds(2)).as(StepVerifier::create).expectNext(0).verifyComplete();
+        tags.advance("04A1B2C3D4E5F6", 31, 9, T0.plusSeconds(3)).as(StepVerifier::create).expectNext(1).verifyComplete();
+
+        tags.findById("04A1B2C3D4E5F6").as(StepVerifier::create)
+            .assertNext(tag -> {
+                assertThat(tag.deviceId()).isEqualTo(31);
+                assertThat(tag.lastCounter()).isEqualTo(9);
+                assertThat(tag.lastClaimAt()).isEqualTo(T0.plusSeconds(3));
+            })
+            .verifyComplete();
+    }
+
+    @Test
+    void should_store_the_claims_of_a_cycle() {
+        final ApplianceRunEntity run = runs.save(ApplianceRunEntity.builder().deviceId(7).startedAt(T0)
+            .finishedAt(T0.plusSeconds(3600)).build()).block();
+
+        claims.save(ApplianceClaimEntity.builder().runId(run.id()).member("Anna").source("nfc")
+            .claimedAt(T0.plusSeconds(4000)).counter(12).build()).block();
+
+        claims.findByRunIdOrderByClaimedAt(run.id()).as(StepVerifier::create)
+            .assertNext(claim -> {
+                assertThat(claim.member()).isEqualTo("Anna");
+                assertThat(claim.source()).isEqualTo("nfc");
+                assertThat(claim.claimedAt()).isEqualTo(T0.plusSeconds(4000));
+                assertThat(claim.counter()).isEqualTo(12);
+            })
+            .verifyComplete();
     }
 }

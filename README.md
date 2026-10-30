@@ -32,13 +32,13 @@ plugs they run on (epic HAS-270). From the draw it tells when a cycle runs and w
 finished, tells the household that the appliance needs attention, reminds it until somebody
 acknowledges it in the application, and keeps the history of the cycles. The household is told
 through the `household` category of `notification-service` - a JSON `HouseholdNotification`
-(`smart-home-sdk` 1.14.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
+(`smart-home-sdk` 1.15.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
 `notification-service` words it in Polish for the household's Discord channel, SMS and Web Push.
 
 **Since HAS-278 it reads the plugs and detects the cycles.** The appliances are devices of the
 registry of `database-service` - the kind `appliance` with its `ApplianceSettings` - read at the
 start and every 5 minutes; a Gen1 plug is polled every 30 s (`GET /meter/<channel>`, the
-`meter` of `shelly-client` 2.2.0). Each valid sample is stored and given to the detector of its
+`meter` of `shelly-client` 2.3.0). Each valid sample is stored and given to the detector of its
 appliance:
 
 | From | To | When |
@@ -69,11 +69,24 @@ announced on the technical channel of `notification-service` (`alert`, English, 
 household's): one alert per check naming every plug out, a reminder every `appliance.monitor.reminder-every`
 (`PT1H`), one info when it reads again. Checked every minute from the second; a bare number of either setting is
 minutes. The alerts given live in memory: after a restart an outage still going on is announced again, and the
-return of one announced before it is not. What comes next:
+return of one announced before it is not.
+
+**Since HAS-343 a chore is claimed with the NFC tag on the appliance.** Each appliance carries an NTAG 424 DNA
+with SUN in its encrypted form: every read of the tag opens a URL with its UID and its read counter encrypted
+(`picc_data`) and an AES-CMAC over both (the SDM chapter of NXP AN12196 -
+the session key from `3CC300010080 || UID || counter`, the MAC over nothing else, its
+odd bytes sent), so a link copied or bookmarked is worth nothing. The tag page of the dashboard (HAS-346) posts
+what it read, with the member of its profile, to `POST /home/appliance/claims`. The service checks the tag
+(`appliance.nfc.tags` - the UID of each tag and the id of its appliance - and the key `appliance.nfc.key`), the
+member (the household profiles) and the counter (above the last one taken, in one statement); then a finished
+cycle waiting is acknowledged as from the application - the reminders stop, `appliance acknowledged` names the
+member - and the claim is stored against the latest cycle that finished within `appliance.claim-window` (12 h,
+a bare number is hours), acknowledged before or not. What comes next:
 
 | Task | What |
 |---|---|
-| HAS-281 | the routes of `api-gateway-service` |
+| HAS-344 | the claim with the snapshot of who was at home |
+| HAS-345 | the report of the chores per member |
 
 # Run locally
 
@@ -96,10 +109,13 @@ return of one announced before it is not. What comes next:
   off under `test`. **A local run with the real values is the production database.**
 - `database-service` is `internal.service.database` - `http://localhost:6005` in the `local`
   profile.
+- **The key of the tags**: `appliance-nfc-key` (32 hex characters, AES-128) - mandatory, the service refuses to
+  start without it. The tags: `appliance.nfc.tags.<uid>=<device id>` (in the manifest the variable
+  `APPLIANCE_NFC_TAGS_<UID>`); without them every claim is `400 INVALID_TAG`.
 
 # API
 
-Under the base path `/home/appliance`; not routed by the gateway before HAS-281. The
+Under the base path `/home/appliance`, routed by the gateway (`/appliance`, `/appliance/**`, HAS-281). The
 times are the clock of the house without an offset; a field not known is left out.
 
 | Method | Path | Answer |
@@ -108,7 +124,8 @@ times are the clock of the house without an offset; a field not known is left ou
 | `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
 | `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt`, `acknowledgedBy` (who acknowledged it in the application, HAS-347) |
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
-| `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; a cycle still `finishing` (HAS-348) is ended at the fall and acknowledged at once, never announced (only `appliance acknowledged` goes out), one shorter than `minRunMinutes` too (a member saw it; unacknowledged it is still discarded unseen); `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name (a mute for the administrator once the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished or finishing cycle waits, `404 NOT_FOUND_APPLIANCE` |
+| `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; a cycle still `finishing` (HAS-348) is ended at the fall and acknowledged at once, never announced (only `appliance acknowledged` goes out), one shorter than `minRunMinutes` too (a member saw it; unacknowledged it is still discarded unseen); `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name (a mute for the administrator now that the tag claims of HAS-343 acknowledge for the members); `409 NOTHING_TO_ACKNOWLEDGE` when no finished or finishing cycle waits, `404 NOT_FOUND_APPLIANCE` |
+| `POST` | `/home/appliance/claims` | a chore claimed with the tag of an appliance (HAS-343), body `{piccData, cmac, member}` - 32 and 16 hex characters of any case, the `picc_data` and `cmac` of the URL of the tag, the member 3-50: `200` with `applianceId`, `name`, `state` (after the claim), `member` (the name the registry has), `runId`, `claimedAt`; a finished or finishing cycle waiting is acknowledged with the member first. `400 INVALID_TAG` - `picc_data` and the MAC are not what the key of the tags gives, or the UID inside is not a tag of an appliance; `400 UNKNOWN_MEMBER`; `404 NOT_FOUND_APPLIANCE` - the appliance of the tag is not watched; `409 REPLAYED_TAG` - the counter is not above the last one taken; `409 NOTHING_TO_CLAIM` - no cycle finished within `appliance.claim-window` (the read is spent); `503` - the household profiles could not be read (the read is not spent, post it again); a body that is not a tag read is a `400` |
 
 `from` and `to` are local date-times (`2026-10-24T00:00:00`); an offset, `to` not after `from` or a
 longer range is a `400`. The history is answered for a watched appliance only: one
@@ -123,6 +140,9 @@ with `permission denied for schema public`.
 - `appliance_run` (V1) - one row per cycle, inserted when it starts and completed when it has
   finished; a run below `minRunMinutes` is deleted. V3 adds its messages: `notified_at` (the finish
   announced), `last_message_at`, with `reminders_sent` and `acknowledged_at` of V1; V4 adds `acknowledged_by` (HAS-347).
+- `appliance_tag` and `appliance_claim` (V5, HAS-343) - each tag read, with the counter of its latest accepted
+  read; each claim with its cycle, the member, the source (`nfc`; `app` is reserved, nothing writes it), the time
+  and the counter.
 - `appliance_sample` (V2) - every valid sample, kept `appliance.sample-retention` (14 days, a bare
   number is days, 2-90) and deleted every night at 03:20.
 
