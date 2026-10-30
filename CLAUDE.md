@@ -189,6 +189,15 @@ IntelliJ.
   path - written once) and at the first completion. `ApplianceMonitor.acknowledge` answers the id of the row it
   acknowledged. `GET /{id}` still describes the appliance now: the attribution is read per cycle from `/runs`. The
   words of V6 (`nfc`/`app`/`mute`, `single`/`shared`/`unattributed`) are what HAS-345 reads.
+- **The chores report (HAS-345)**, `ReportController` / `ReportService` / `MemberReportRepository`: **one SQL
+  aggregation per call** (`DatabaseClient`, `unnest` of the text arrays, names matched by `lower()` on both sides,
+  the first spelling shown), pinned on PostgreSQL by `ApplianceRepositoriesTest` (a single, a shared, an away, an
+  unattributed run and one with an unknown snapshot). Cycles by `finished_at` in [from, to); done counts a run
+  attributed to the member while at home at the completion or not known (shared half), doneAway one known to be away;
+  share may pass 1 (a member who came home after the finish). Members from `HouseholdMembers` (the profiles kept
+  5 min, the last list answered while the registry is away; never read - 503); every member listed on every watched
+  appliance with zeros, a device met in the cycles but not watched any more listed without its name, names that are
+  no member under `former`. The range is `400 INVALID_RANGE` (a code - the dashboard words it), at most 366 days.
 - **`appliance_sample`**: every valid sample (about 2880 rows a day per appliance), deleted after
   `appliance.sample-retention` (`ApplianceProperties`, 14d, 2-90 days, a bare number is days) every
   night at 03:20 (`SampleRetention`, bounded 15 min).

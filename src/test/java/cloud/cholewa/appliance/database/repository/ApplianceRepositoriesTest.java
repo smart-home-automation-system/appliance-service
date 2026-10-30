@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.r2dbc.test.autoconfigure.DataR2dbcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -24,9 +25,10 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-//On the tables V1 to V5 create, in a PostgreSQL in Docker (Testcontainers) - the migrations are the
+//On the tables V1 to V6 create, in a PostgreSQL in Docker (Testcontainers) - the migrations are the
 //PostgreSQL ones the pod runs. Without a Docker the test fails, it is not skipped
 @DataR2dbcTest
+@Import(MemberReportRepository.class)
 @Testcontainers
 @ActiveProfiles("test")
 class ApplianceRepositoriesTest {
@@ -45,6 +47,8 @@ class ApplianceRepositoriesTest {
     private ApplianceTagRepository tags;
     @Autowired
     private ApplianceClaimRepository claims;
+    @Autowired
+    private MemberReportRepository report;
 
     @DynamicPropertySource
     static void connectToTheContainer(final DynamicPropertyRegistry registry) {
@@ -265,5 +269,48 @@ class ApplianceRepositoriesTest {
                 assertThat(stored.presentAtCompletion()).containsExactly("Anna");
             })
             .verifyComplete();
+    }
+
+    //HAS-345: the report as one aggregation - a single run, a shared run, a run done away, an unattributed run and a
+    //run with an unknown snapshot, a name spelled in another case, a run outside the range
+    @Test
+    void should_aggregate_the_report_of_the_members() {
+        finished(131, 1, List.of("Anna", "Jan"), "single", List.of("Anna"), List.of("Anna"));
+        finished(131, 2, List.of("Anna", "Jan"), "shared", List.of("Anna", "Jan"), List.of("Anna", "Jan"));
+        finished(131, 3, List.of("Jan"), "single", List.of("Jan"), List.of("Anna"));
+        finished(131, 4, List.of("Anna"), "unattributed", List.of(), List.of("Anna"));
+        finished(131, 5, null, "single", List.of("anna"), null);
+        finished(132, 6, List.of("Jan"), null, null, null);
+        //finished before the range
+        finished(131, -30, List.of("Anna"), "single", List.of("Anna"), List.of("Anna"));
+
+        report.report(T0, T0.plus(Duration.ofDays(1))).collectList().as(StepVerifier::create)
+            .assertNext(rows -> {
+                assertThat(rows).filteredOn(row -> row.kind().equals("member"))
+                    .extracting(row -> List.of(row.deviceId(), row.member().toLowerCase(), row.opportunities(),
+                        row.done().doubleValue(), row.doneAway().doubleValue()))
+                    .containsExactlyInAnyOrder(
+                        List.of(131L, "anna", 3L, 2.5, 0.0),
+                        List.of(131L, "jan", 3L, 0.5, 1.0),
+                        List.of(132L, "jan", 1L, 0.0, 0.0));
+                assertThat(rows).filteredOn(row -> row.kind().equals("unattributed"))
+                    .extracting(row -> List.of(row.deviceId(), row.opportunities()))
+                    .containsExactly(List.of(131L, 1L));
+                assertThat(rows).filteredOn(row -> row.kind().equals("unknown"))
+                    .extracting(MemberReportRepository.ReportRow::opportunities)
+                    .containsExactly(1L);
+            })
+            .verifyComplete();
+    }
+
+    private void finished(final long deviceId, final int hour, final List<String> presentAtFinish,
+                          final String attribution, final List<String> attributedTo, final List<String> presentAtCompletion) {
+        final Instant end = T0.plus(Duration.ofHours(hour));
+        runs.save(ApplianceRunEntity.builder().deviceId(deviceId).startedAt(end.minusSeconds(3600)).finishedAt(end)
+                .presentAtFinish(presentAtFinish).attribution(attribution).attributedTo(attributedTo)
+                .completedAt(attribution == null ? null : end.plusSeconds(600))
+                .completionSource(attribution == null ? null : "unattributed".equals(attribution) ? "mute" : "nfc")
+                .presentAtCompletion(presentAtCompletion).build())
+            .as(StepVerifier::create).expectNextCount(1).verifyComplete();
     }
 }

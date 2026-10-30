@@ -92,8 +92,14 @@ without a member - a mute - leaves a cycle unattributed, and a confirmation late
 attributes it. "Emptied" in the application with a member is stored as a claim of its own (source `app`). When a
 cycle finishes and when it is completed first, presence-service is asked who is at home
 (`/home/presence/residents/presence`, 5 s, kept a minute): a failed or empty answer is stored as not known, never
-as nobody, and never holds the cycle or the confirmation back. What comes next: the report of the chores per member
-(HAS-345).
+as nobody, and never holds the cycle or the confirmation back.
+
+**Since HAS-345 the chores are reported per member**, fairly: against the cycles that finished while the member was at
+home. `GET /home/appliance/reports/members?from=&to=` counts the cycles that finished in the range - per member and
+appliance the opportunities (the member at home at the finish), done (attributed to them, a shared cycle counting
+half), doneAway (attributed while known to be away at the completion) and the share (done / opportunities). Every
+member of the registry is listed, one with nothing done too; a name that is no member any more is listed under
+`former`; the cycles nobody confirmed (a mute) and those whose presence is not known are counted apart.
 
 # Run locally
 
@@ -131,6 +137,7 @@ times are the clock of the house without an offset; a field not known is left ou
 | `GET` | `/home/appliance/{id}` | one of them; `404 NOT_FOUND_APPLIANCE` |
 | `GET` | `/home/appliance/{id}/runs?from=&to=` | the cycles that started in the range (at most 31 days): `id`, `startedAt`, `finishedAt`, `energyWh`, `maxWatts`, `acknowledgedAt`, `acknowledgedBy` (who acknowledged it in the application, HAS-347); since HAS-344 `completedAt` and `completionSource` (`nfc`, `app`, `mute`), `attributedTo` (one or two names) and `attribution` (`single`, `shared`, `unattributed`), `presentAtFinish` and `presentAtCompletion` (who was at home - `[]` nobody, left out when not known) |
 | `GET` | `/home/appliance/{id}/samples?from=&to=` | the samples of the range (at most 2 days): `at`, `watts` |
+| `GET` | `/home/appliance/reports/members?from=&to=` | the chores report of the cycles that finished in the range (local date-times of the house, at most 366 days - `400 INVALID_RANGE`, HAS-345): `from`, `to`, `members` (every member of the registry - `member`, `appliances` with `applianceId`, `name`, `opportunities`, `done`, `doneAway`, `share` left out without an opportunity, and `total`), `former` (names no longer members, the same way), `unattributed` (per appliance, the muted cycles), `unknownPresence` (the cycles whose presence at the finish is not known); one SQL aggregation per call; `503` when the household registry was never read |
 | `POST` | `/home/appliance/{id}/acknowledge?member=` | `204` - the finished cycle acknowledged, its reminders stop; a cycle still `finishing` (HAS-348) is ended at the fall and acknowledged at once, never announced (only `appliance acknowledged` goes out), one shorter than `minRunMinutes` too (a member saw it; unacknowledged it is still discarded unseen); `member` (optional, 3-50, HAS-347) - who acknowledges it, checked against the profiles of the household whatever the case and stored and told by the name the registry has, `400 UNKNOWN_MEMBER` for a name it does not have (nothing is acknowledged), and a failed read of the profiles acknowledges without a name - since HAS-344 with a member it is a confirmation equal to a tag read (a claim with source `app`, the cycle attributed), without one a mute (the cycle unattributed); `409 NOTHING_TO_ACKNOWLEDGE` when no finished or finishing cycle waits, `404 NOT_FOUND_APPLIANCE` |
 | `POST` | `/home/appliance/claims` | a chore claimed with the tag of an appliance (HAS-343), body `{piccData, cmac, member}` - 32 and 16 hex characters of any case, the `picc_data` and `cmac` of the URL of the tag, the member 3-50: `200` with `applianceId`, `name`, `state` (after the claim), `member` (the name the registry has), `runId`, `claimedAt`; a finished or finishing cycle waiting is acknowledged with the member first. `400 INVALID_TAG` - `picc_data` and the MAC are not what the key of the tags gives, or the UID inside is not a tag of an appliance; `400 UNKNOWN_MEMBER`; `404 NOT_FOUND_APPLIANCE` - the appliance of the tag is not watched; `409 REPLAYED_TAG` - the counter is not above the last one taken; `409 NOTHING_TO_CLAIM` - no cycle finished within `appliance.claim-window` (the read is spent); `503` - the household profiles could not be read (the read is not spent, post it again); a body that is not a tag read is a `400` |
 
