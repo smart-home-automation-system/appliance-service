@@ -23,15 +23,15 @@ public record NfcProperties(
     @DefaultValue Map<String, Long> tags
 ) {
 
-    private static final Pattern KEY = Pattern.compile("\\p{XDigit}{32}");
-    private static final Pattern UID = Pattern.compile("\\p{XDigit}{14}");
+    private static final Pattern KEY_PATTERN = Pattern.compile("\\p{XDigit}{32}");
+    private static final Pattern UID_PATTERN = Pattern.compile("\\p{XDigit}{14}");
 
     public NfcProperties {
-        if (key == null || !KEY.matcher(key).matches()) {
+        if (key == null || !KEY_PATTERN.matcher(key).matches()) {
             throw new IllegalArgumentException("appliance.nfc.key must be 32 hex characters (AES-128)");
         }
         tags.forEach((uid, deviceId) -> {
-            if (!UID.matcher(uid).matches() || deviceId == null) {
+            if (!UID_PATTERN.matcher(uid).matches() || deviceId == null) {
                 throw new IllegalArgumentException("appliance.nfc.tags must map a UID of 14 hex characters to a device id: " + uid);
             }
         });

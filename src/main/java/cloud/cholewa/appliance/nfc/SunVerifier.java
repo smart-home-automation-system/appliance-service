@@ -11,11 +11,12 @@ import java.util.Optional;
 //The SUN message of an NTAG 424 DNA (HAS-343) as NFC.cool Tools sets it up: the UID and the read counter encrypted
 //into picc_data, with Key 0 as the meta-read and the file-read key, and the CMAC over nothing else
 //(SDMMACInputOffset = SDMMACOffset), as in the SDM chapter of NXP AN12196:
-//  picc_data = AES-CBC(key, IV 0) of  C7 || UID (7 bytes) || counter (3 bytes, the least significant first) || 5 random bytes
-//    (C7: the UID and the counter mirrored, a UID of 7 bytes)
-//  SV2 = 3C C3 00 01 00 80 || UID || counter
-//  session key = AES-CMAC(key, SV2), MAC = AES-CMAC(session key, empty message)
-//  the 8 bytes sent are the bytes 1, 3, ..., 15 of the MAC (counted from 0 - "the even-numbered bytes" of NXP,
+//- picc_data is one AES-CBC block (zero IV) under the key; decrypted, it starts with the byte C7 (the UID and the
+//  counter mirrored, a UID of 7 bytes), then the UID, then the counter in 3 bytes with the least significant first,
+//  then 5 random bytes;
+//- the session key is the AES-CMAC under the key of SV2, which is the bytes 3C C3 00 01 00 80 followed by the UID
+//  and the counter; the MAC is the AES-CMAC under the session key of an empty message;
+//- the 8 bytes sent are the bytes 1, 3, ..., 15 of the MAC (counted from 0 - "the even-numbered bytes" of NXP,
 //  who count from 1).
 //Pure: no I/O, no clock - the replay check is the caller's. The key is never logged nor answered
 public final class SunVerifier {

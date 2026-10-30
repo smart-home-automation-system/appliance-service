@@ -1,12 +1,14 @@
 package cloud.cholewa.appliance.nfc;
 
 import javax.crypto.Cipher;
+import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.security.GeneralSecurityException;
-import java.util.Arrays;
 
 //AES-CMAC of RFC 4493 with the AES of the JDK (it has no CMAC of its own), pinned by AesCmacTest on the vectors of
-//the RFC. A key of 16 bytes, the full 16 bytes of the MAC
+//the RFC. CMAC is a CBC-MAC whose last block is mixed with a subkey, so it runs on AES-CBC with a zero IV: the subkey
+//comes from the encrypted zero block, the MAC is the last block of the CBC of the prepared message. A key of 16 bytes,
+//the full 16 bytes of the MAC
 final class AesCmac {
 
     private static final int BLOCK = 16;
@@ -17,37 +19,36 @@ final class AesCmac {
 
     static byte[] mac(final byte[] key, final byte[] message) {
         try {
-            final Cipher aes = Cipher.getInstance("AES/ECB/NoPadding");
-            aes.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"));
-            final byte[] k1 = shifted(aes.doFinal(new byte[BLOCK]));
+            final byte[] l = cbc(key, new byte[BLOCK]);
+            final byte[] k1 = shifted(l);
             final byte[] k2 = shifted(k1);
 
             final int blocks = Math.max(1, (message.length + BLOCK - 1) / BLOCK);
             final boolean complete = message.length > 0 && message.length % BLOCK == 0;
-            final byte[] last = new byte[BLOCK];
             final int lastStart = (blocks - 1) * BLOCK;
-            if (complete) {
-                xor(last, message, lastStart, k1);
-            } else {
-                final byte[] padded = new byte[BLOCK];
-                final int rest = message.length - lastStart;
-                System.arraycopy(message, lastStart, padded, 0, rest);
-                padded[rest] = (byte) 0x80;
-                xor(last, padded, 0, k2);
+            final byte[] prepared = new byte[blocks * BLOCK];
+            System.arraycopy(message, 0, prepared, 0, message.length);
+            if (!complete) {
+                prepared[message.length] = (byte) 0x80;
+            }
+            final byte[] subkey = complete ? k1 : k2;
+            for (int i = 0; i < BLOCK; i++) {
+                prepared[lastStart + i] ^= subkey[i];
             }
 
-            byte[] x = new byte[BLOCK];
-            for (int block = 0; block < blocks - 1; block++) {
-                final byte[] y = new byte[BLOCK];
-                xor(y, message, block * BLOCK, x);
-                x = aes.doFinal(y);
-            }
-            final byte[] y = new byte[BLOCK];
-            xor(y, last, 0, x);
-            return aes.doFinal(y);
+            final byte[] chained = cbc(key, prepared);
+            final byte[] mac = new byte[BLOCK];
+            System.arraycopy(chained, lastStart, mac, 0, BLOCK);
+            return mac;
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("AES is not available", e);
         }
+    }
+
+    private static byte[] cbc(final byte[] key, final byte[] blocks) throws GeneralSecurityException {
+        final Cipher aes = Cipher.getInstance("AES/CBC/NoPadding");
+        aes.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key, "AES"), new IvParameterSpec(new byte[BLOCK]));
+        return aes.doFinal(blocks);
     }
 
     //the subkey step of RFC 4493: one bit to the left, Rb into the last byte when the top bit fell out
@@ -61,13 +62,5 @@ final class AesCmac {
             out[BLOCK - 1] ^= RB;
         }
         return out;
-    }
-
-    //target = source[from .. from + 16) xor other
-    private static void xor(final byte[] target, final byte[] source, final int from, final byte[] other) {
-        final byte[] part = Arrays.copyOfRange(source, from, from + BLOCK);
-        for (int i = 0; i < BLOCK; i++) {
-            target[i] = (byte) (part[i] ^ other[i]);
-        }
     }
 }
