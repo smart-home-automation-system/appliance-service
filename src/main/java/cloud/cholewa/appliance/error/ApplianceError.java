@@ -7,7 +7,8 @@ import lombok.RequiredArgsConstructor;
 
 //The causes of a request the API refuses. Their names are the codes of the answer (ErrorId.codeOf) - wire
 //contract for a caller that branches on them, the dashboard first of all, pinned by ApplianceErrorTest.
-//A range that breaks a rule is a 400 without a code, as the other histories answer it
+//A range of a history that breaks a rule is a 400 without a code, as the other histories answer it; the range of the
+//chores report (HAS-345) has the code INVALID_RANGE, which the dashboard words
 @Getter
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public enum ApplianceError implements ErrorId {
@@ -28,7 +29,10 @@ public enum ApplianceError implements ErrorId {
     REPLAYED_TAG("Replayed tag read"),
 
     //the appliance of the tag has no cycle finished within the claim window (HAS-343)
-    NOTHING_TO_CLAIM("Nothing to claim");
+    NOTHING_TO_CLAIM("Nothing to claim"),
+
+    //a range of the chores report that breaks its rules - to not after from, or longer than 366 days (HAS-345)
+    INVALID_RANGE("Invalid range");
 
     private final String description;
 }

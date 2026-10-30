@@ -38,6 +38,10 @@ public class ApplianceException extends RuntimeException {
             "The read is not a valid read of a tag of an appliance");
     }
 
+    public static ApplianceException invalidRange(final String reason) {
+        return new ApplianceException(HttpStatus.BAD_REQUEST, ApplianceError.INVALID_RANGE, reason);
+    }
+
     public static ApplianceException replayedTag(final String uid) {
         return new ApplianceException(HttpStatus.CONFLICT, ApplianceError.REPLAYED_TAG,
             "The read of tag " + uid + " was taken before");
