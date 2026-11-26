@@ -16,11 +16,13 @@ IntelliJ.
 - Talks to: `database-service` (the device registry - the kind `appliance` and its
   `ApplianceSettings`, `internal.service.database`; the household profiles, HAS-347), the Shelly plugs over HTTP (`GET /meter/<channel>`, HAS-278),
   RabbitMQ (publishes the household notifications - `appliance finished`, `reminder`, `acknowledged`, HAS-279 - and the alerts and infos of the plugs that stop answering, HAS-280); routed by `api-gateway-service` from HAS-281.
-- Uses libraries: `cholewa-commons` 1.12.0 (`NotificationPublisher.publishHousehold`, the pooled
-  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.15.0
-  (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`), `shelly-client` 2.3.0
+- Uses libraries: `cholewa-commons` 2.0.0 (`NotificationPublisher.publishHousehold`, the pooled
+  `ConnectionFactory`, `ScheduledPass`, the error contract), `smart-home-sdk` 1.26.0
+  (`SmartDevice`, `ApplianceSettings`, `HouseholdNotification`, `HouseholdProfile` - its `permissions` is a list of the
+  enum, so a permission the SDK does not know fails the read of the profiles: 1.26.0 since HAS-512 for
+  `amplifier_unlock`), `shelly-client` 2.7.0
   (`ShellyGen1Client.meter` - the plugs are Gen1; added to the library for this service in HAS-278).
-- Database: own database `home-automation-appliance`, pool 2 - with it this project holds 18 of the
+- Database: own database `home-automation-appliance`, pool 2 - with it this project holds 26 of the
   47 connections of the managed PostgreSQL (22 until the plan change of 2026-10-25; the split is in
   `organization.md`).
 - Integrates with hardware: Shelly plugs (Gen1, polled - no `/device` consumer: Gen1 does not
@@ -35,8 +37,10 @@ IntelliJ.
   (`database.*`) and, for the registry, database-service on 6005 and, for who is at home (HAS-344), presence-service on 6009. **The real `database-*` values
   are the production database** - a migration is rehearsed on a throwaway PostgreSQL, never by a
   local run.
-- Spring Boot 4.1.2, logbook 4.2.0; own libraries on the latest releases, as the org rule asks of
-  every service task.
+- Spring Boot 4.2.0, logbook 4.2.0; own libraries on the latest releases, as the org rule asks of
+  every service task. Boot 4.2 moved the classic RabbitMQ support to `spring-boot-starter-rabbitmq` (HAS-512); the
+  one connection here is the auto-configured one of `NotificationPublisher`, so the starter is all that changed. The
+  plugins the Boot parent manages carry no version of their own.
 
 ## Specifics
 

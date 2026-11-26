@@ -58,6 +58,19 @@ class HouseholdProfilesClientTest {
         assertThat(request.getUrl().encodedPath()).isEqualTo("/home/household/profiles");
     }
 
+    //the permission of the amplifier unlock (HAS-509, SDK 1.26.0): a value the SDK did not know failed the read of the
+    //profiles, so the check of a member (an acknowledgement, a tag claim) would fail once somebody is granted it
+    @Test
+    void should_read_a_profile_with_the_amplifier_unlock() {
+        server.enqueue(json("""
+            [{"name":"Anna","role":"resident","rooms":["kitchen"],"permissions":["heating_switch","amplifier_unlock"]}]
+            """));
+
+        client.getProfiles().as(StepVerifier::create)
+            .assertNext(profiles -> assertThat(profiles).extracting(HouseholdProfile::getName).containsExactly("Anna"))
+            .verifyComplete();
+    }
+
     //what the downstream said is a WARN, never passed on
     @Test
     void should_fail_when_database_service_fails() {
