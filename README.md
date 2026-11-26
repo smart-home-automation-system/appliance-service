@@ -11,7 +11,7 @@
 
 ![GitHub top language](https://img.shields.io/github/languages/top/smart-home-automation-system/appliance-service?style=plastic)
 ![Java](https://img.shields.io/badge/java-21-yellow?style=plastic)
-![SpringBoot](https://img.shields.io/badge/SpringBoot-4.1.2-blue?style=plastic)
+![SpringBoot](https://img.shields.io/badge/SpringBoot-4.2.0-blue?style=plastic)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_appliance-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_appliance-service)
 [![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=smart-home-automation-system_appliance-service&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=smart-home-automation-system_appliance-service)
 
@@ -32,13 +32,13 @@ plugs they run on (epic HAS-270). From the draw it tells when a cycle runs and w
 finished, tells the household that the appliance needs attention, reminds it until somebody
 acknowledges it in the application, and keeps the history of the cycles. The household is told
 through the `household` category of `notification-service` - a JSON `HouseholdNotification`
-(`smart-home-sdk` 1.15.0) published with the `NotificationPublisher` of `cholewa-commons` 1.12.0;
+(`smart-home-sdk` 1.26.0) published with the `NotificationPublisher` of `cholewa-commons` 2.0.0;
 `notification-service` words it in Polish for the household's Discord channel, SMS and Web Push.
 
 **Since HAS-278 it reads the plugs and detects the cycles.** The appliances are devices of the
 registry of `database-service` - the kind `appliance` with its `ApplianceSettings` - read at the
 start and every 5 minutes; a Gen1 plug is polled every 30 s (`GET /meter/<channel>`, the
-`meter` of `shelly-client` 2.3.0). Each valid sample is stored and given to the detector of its
+`meter` of `shelly-client` 2.7.0). Each valid sample is stored and given to the detector of its
 appliance:
 
 | From | To | When |
@@ -115,7 +115,8 @@ member of the registry is listed, one with nothing done too; a name that is no m
   returns and the mandatory flag. The `local` profile publishes with `env: dev` - into the dev
   queue, never to the household.
 - **The database**: own database `home-automation-appliance`, `database.pool.max-size: 2` - this
-  service's share of the 22 backend connections of the managed database (18 allotted with it).
+  service's share of the 47 connections of the managed database (26 allotted to this project - the split is in
+  `organization.md`).
   The connection properties (`database-host`, `database-port`, `database-name`, `database-user`,
   `database-password`) are bound to the `database.*` prefix of `cholewa-commons`; Flyway derives
   its JDBC URL from them (`--flyway-url=...` overrides). Flyway runs in `home` / `local` and is
